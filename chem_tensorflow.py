@@ -23,11 +23,12 @@ def get_train_and_validation_files(args):
     elif args.get('--pr') == 'head':
         train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_head.json'
         valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_head.json'
-    elif args.get('--pr') == 'head2':
-        train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_head2.json'
-        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_head2.json'
 
-    else:
+    elif args.get('--pr') == 'identity':
+        train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_id.json'
+        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json'
+
+    elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
         valid_file = 'molecules_valid.json'
 
@@ -39,13 +40,13 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
 
         return {
-            'num_epochs': 2,
+            'num_epochs': 1,
             'patience': 25,
             'learning_rate': 0.001,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
-            'hidden_size': 100,
+            'hidden_size': 250,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -55,11 +56,13 @@ class ChemModel(object):
             'random_seed': 0,
 
             'train_file': train_file,
-            'valid_file': valid_file
+            'valid_file': valid_file,
+            'output_size': 1 if self.args['--pr'] != 'identity' else 150
         }
 
     def __init__(self, args):
         self.args = args
+
         # Collect argument things:
         data_dir = ''
         if '--data_dir' in args and args['--data_dir'] is not None:
@@ -102,14 +105,17 @@ class ChemModel(object):
         config.gpu_options.allow_growth = True
         self.graph = tf.Graph()
         self.sess = tf.Session(graph=self.graph, config=config)
+
         with self.graph.as_default():
             tf.set_random_seed(params['random_seed'])
             self.placeholders = {}
             self.weights = {}
             self.ops = {}
             self.make_model()
-            self.make_train_step()
-            self.make_summaries()
+
+            if not self.args['--experiment']:
+                self.make_train_step()
+                self.make_summaries()
 
             # Restore/initialize variables:
             restore_file = args.get('--restore')
@@ -119,6 +125,7 @@ class ChemModel(object):
                 self.initialize_model()
                 self.train_step_id = 0
                 self.valid_step_id = 0
+
             self.train_writer = tf.summary.FileWriter(os.path.join(tb_log_dir, 'train'), graph=self.graph)
             self.valid_writer = tf.summary.FileWriter(os.path.join(tb_log_dir, 'validation'), graph=self.graph)
 
@@ -157,10 +164,23 @@ class ChemModel(object):
         raise Exception("Models have to implement process_raw_graphs!")
 
     def make_model(self):
-        self.placeholders['target_values'] = tf.placeholder(tf.float32, [None, len(self.params['task_ids']), None],
-                                                            name='target_values')
-        self.placeholders['target_mask'] = tf.placeholder(tf.float32, [len(self.params['task_ids']), None],
-                                                          name='target_mask')
+        #TODO: refactor
+        if self.args['--pr'] == 'molecule':
+            self.placeholders['target_values'] = tf.placeholder(
+                tf.float32, [len(self.params['task_ids']), None], name='target_values')
+            self.placeholders['target_mask'] = tf.placeholder(tf.float32,
+                                                              [len(self.params['task_ids']), None],
+                                                              name='target_mask')
+        elif self.args['--pr'] == 'identity':
+            self.placeholders['target_values'] = tf.placeholder(
+                tf.float32, [None, None, self.num_edge_types, None], name='target_values')
+            self.placeholders['target_mask'] = tf.placeholder(
+                tf.float32, [self.num_edge_types, None], name='target_mask')
+        else:
+            self.placeholders['target_values'] = tf.placeholder(
+                tf.float32, [None, len(self.params['task_ids']), None], name='target_values')
+            self.placeholders['target_mask'] = tf.placeholder(
+                tf.float32, [len(self.params['task_ids']), None], name='target_mask')
         self.placeholders['num_graphs'] = tf.placeholder(tf.int32, [], name='num_graphs')
         self.placeholders['out_layer_dropout_keep_prob'] = tf.placeholder(tf.float32, [], name='out_layer_dropout_keep_prob')
 
@@ -175,18 +195,31 @@ class ChemModel(object):
         self.ops['losses'] = []
         for (internal_id, task_id) in enumerate(self.params['task_ids']):
             with tf.variable_scope("out_layer_task%i" % task_id):
+
+                output_size =  self.params['output_size']
                 with tf.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], 1, [],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.variable_scope("regression"):
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], 1, [],
+                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
                 task_target_mask = self.placeholders['target_mask'][internal_id, :]
                 task_target_num = tf.reduce_sum(task_target_mask) + SMALL_NUMBER
-                labels = self.placeholders['target_values'][:, internal_id, :]
+
+                if self.args['--pr'] == 'molecule':
+                    labels = self.placeholders['target_values'][internal_id, :]
+                    mask = tf.transpose(self.placeholders['node_mask'])
+                elif self.args['--pr'] == 'identity':
+                    labels = self.placeholders['target_values']  # (o,v,e,b)
+                    labels = tf.transpose(labels, [2, 1, 0, 3])  # (e,v,o,b)
+                    labels = tf.reshape(labels, [-1, self.placeholders['num_graphs']]) # (e*v*o,b)
+                    mask = tf.transpose(self.placeholders['node_mask'])  # (e*v*o,b)
+                else:
+                    labels = self.placeholders['target_values'][:, internal_id, :]
+                    mask = tf.transpose(self.placeholders['node_mask'])
                 # diff = computed_values - labels
                 # diff = diff * task_target_mask  # Mask out unused values
                 # self.ops['accuracy_task%i' % task_id] = tf.reduce_sum(tf.abs(diff)) / task_target_num
@@ -203,23 +236,48 @@ class ChemModel(object):
                 # diff = tf.nn.softmax_cross_entropy_with_logits(labels=labels,
                 #                                                logits=computed_values)
                 # task_loss = diff
+                if  self.args['--pr'] == 'molecule':
+                    self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
+                else:
+                    new_mask = tf.cast(mask, tf.bool)
+                    #TODO: delete these two
+                    masked_computed_values = tf.boolean_mask(computed_values, mask= new_mask)
+                    masked_labels = tf.boolean_mask(labels, mask= new_mask)
 
-                task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
-                #TODO: borrar
-                # task_loss = tf.reduce_sum(-tf.reduce_sum(computed_values , axis =1))
+                    masked_loss = tf.boolean_mask(labels * tf.log(computed_values), mask= new_mask)
+                    #TODO: change mean for sum
+                    task_loss = tf.reduce_sum(-1*masked_loss)/task_target_num
+                    #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
 
-                # Normalise loss to account for fewer task-specific examples in batch:
-                # task_loss = task_loss * (
-                #             1.0 / (self.params['task_sample_ratios'].get(task_id) or 1.0))
 
-                self.ops['accuracy_task%i' % task_id] = task_loss
-                self.ops['losses'].append(task_loss)
-                self.ops['computed_values'] = computed_values
-                self.ops['labels'] = labels
+
+                    # Normalise loss to account for fewer task-specific examples in batch:
+                    # task_loss = task_loss * (
+                    #             1.0 / (self.params['task_sample_ratios'].get(task_id) or 1.0))
+
+                    self.ops['accuracy_task%i' % task_id] = task_loss
+                    self.ops['losses'].append(task_loss)
+                    self.ops['computed_values'] = computed_values
+                    self.ops['masked_computed_values'] = masked_computed_values
+                    self.ops['masked_labels'] = masked_labels
+                    self.ops['labels'] = labels
+                    self.ops['masked_loss'] = masked_loss
+                    self.ops['new_mask'] =  new_mask
 
 
 
         self.ops['loss'] = tf.reduce_sum(self.ops['losses'])
+
+    def calculate_losses_for_molecules(self, computed_values, internal_id, task_id):
+        diff = computed_values - self.placeholders['target_values'][internal_id, :]
+        task_target_mask = self.placeholders['target_mask'][internal_id, :]
+        task_target_num = tf.reduce_sum(task_target_mask) + SMALL_NUMBER
+        diff = diff * task_target_mask  # Mask out unused values
+        self.ops['accuracy_task%i' % task_id] = tf.reduce_sum(tf.abs(diff)) / task_target_num
+        task_loss = tf.reduce_sum(0.5 * tf.square(diff)) / task_target_num
+        # Normalise loss to account for fewer task-specific examples in batch:
+        task_loss = task_loss * (1.0 / (self.params['task_sample_ratios'].get(task_id) or 1.0))
+        self.ops['losses'].append(task_loss)
 
     def make_train_step(self):
         trainable_vars = self.sess.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
@@ -242,6 +300,7 @@ class ChemModel(object):
             else:
                 clipped_grads.append((grad, var))
         self.ops['train_step'] = optimizer.apply_gradients(clipped_grads)
+
         # Initialize newly-introduced variables:
         self.sess.run(tf.local_variables_initializer())
 
@@ -287,7 +346,15 @@ class ChemModel(object):
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = self.params['out_layer_dropout_keep_prob']
                 fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'], self.ops['train_step'],
                               self.ops['labels'], self.ops['computed_values'],
-                              self.ops['final_node_representations'],]
+                              self.ops['final_node_representations'],
+                              self.placeholders['node_mask'], self.ops['losses'],
+                              self.ops['masked_labels'], self.ops['masked_computed_values'],
+                              self.ops['masked_loss'], self.ops['new_mask'],
+                              self.ops['last_h'], self.ops['gate_input'],
+                              self.placeholders['initial_node_representation'],
+                              self.weights['edge_weights'], self.weights['edge_biases'],
+                              self.ops['del1']
+                              ]
                               # self.weights['regression_gate_task0'],
                               # self.weights['regression_transform_task0']]
             else:
@@ -295,6 +362,26 @@ class ChemModel(object):
                 fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary']]
 
             result = self.sess.run(fetch_list, feed_dict=batch_data)
+            #TODO: delete
+
+            # labels = result[4]
+            # computed_values = result[5]
+            # final_node_representations = result[6]
+            # node_mask = result[7]
+            # masked_labels = result[9]
+            # masked_computed_values = result[10]
+            # masked_loss = result[11]
+            # inv_mask = result[12]
+            # last_h = result[13]
+            # gate_input = result[14]
+            # initial_node_representation = result[15]
+            # edge_weights = result[16]
+            # edge_biases = result[17]
+            # del1 = result[18]
+
+            loss = result[0]
+            # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
+
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
             writer.add_summary(batch_summary, start_step + step)
@@ -388,6 +475,7 @@ class ChemModel(object):
     def initialize_model(self) -> None:
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
+
         self.sess.run(init_op)
 
     def restore_progress(self, model_path: str) -> (int, int):

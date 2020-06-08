@@ -10,6 +10,7 @@ SMALL_NUMBER = 1e-7
 
 def glorot_init(shape):
     initialization_range = np.sqrt(6.0 / (shape[-2] + shape[-1]))
+
     return np.random.uniform(low=-initialization_range, high=initialization_range, size=shape).astype(np.float32)
 
 
@@ -47,10 +48,56 @@ class MLP(object):
     def make_network_params(self):
         dims = [self.in_size] + self.hid_sizes + [self.out_size]
         weight_sizes = list(zip(dims[:-1], dims[1:]))
-        weights = [tf.Variable(self.init_weights(s), name='MLP_W_layer%i' % i)
+
+        weights = [tf.Variable(self.init_weights(s), name='MLP_W_layer%i' % i, validate_shape=True)
                    for (i, s) in enumerate(weight_sizes)]
-        biases = [tf.Variable(np.zeros(s[-1]).astype(np.float32), name='MLP_b_layer%i' % i)
+
+        biases = [tf.Variable(tf.zeros(s[-1]), name='MLP_b_layer%i' % i, validate_shape=True)
                   for (i, s) in enumerate(weight_sizes)]
+
+        # weights = [tf.Variable(self.init_weights(s), name='MLP_W_layer%i' % i)
+        #            for (i, s) in enumerate(weight_sizes)]
+        #
+        # biases = [tf.Variable(tf.zeros(s[-1]), name='MLP_b_layer%i' % i)
+        #           for (i, s) in enumerate(weight_sizes)]
+
+        network_params = {
+            "weights": weights,
+            "biases": biases,
+        }
+
+        return network_params
+
+    def init_weights(self, shape):
+        return np.sqrt(6.0 / (shape[-2] + shape[-1])) * (
+                    2 * np.random.rand(*shape).astype(np.float32) - 1)
+        #if you need a variable output size
+        # return tf.cast(tf.math.sqrt(6 / (shape[-2] + shape[-1])), dtype=tf.float32) * (2 * tf.random.normal(shape) - 1)
+
+    def __call__(self, inputs):
+        acts = inputs
+        for W, b in zip(self.params["weights"], self.params["biases"]):
+            hid = tf.matmul(acts, tf.nn.dropout(W, self.dropout_keep_prob)) + b
+            acts = tf.nn.relu(hid)
+
+        last_hidden = hid
+        return last_hidden
+
+
+
+class MLP2(object):
+    def __init__(self, in_size, out_size, hid_sizes, dropout_keep_prob):
+        self.in_size = in_size
+        self.out_size = out_size
+        self.hid_sizes = hid_sizes
+        self.dropout_keep_prob = dropout_keep_prob
+        self.params = self.make_network_params()
+
+    def make_network_params(self):
+        dims = [self.in_size] + self.hid_sizes + [self.out_size]
+        weight_sizes = list(zip(dims[:-1], dims[1:]))
+        weights = [self.init_weights(s) for (i, s) in enumerate(weight_sizes)]
+        biases = [np.zeros(s[-1]).astype(np.float32) for (i, s) in enumerate(weight_sizes)]
 
         network_params = {
             "weights": weights,
@@ -62,11 +109,17 @@ class MLP(object):
     def init_weights(self, shape):
         return np.sqrt(6.0 / (shape[-2] + shape[-1])) * (2 * np.random.rand(*shape).astype(np.float32) - 1)
 
+    def relu(self, X):
+        return np.maximum(0, X)
+
     def __call__(self, inputs):
         acts = inputs
         for W, b in zip(self.params["weights"], self.params["biases"]):
-            hid = tf.matmul(acts, tf.nn.dropout(W, self.dropout_keep_prob)) + b
-            acts = tf.nn.relu(hid)
+            dropout = tf.nn.dropout(W, self.dropout_keep_prob)
+            dropout_out = dropout.eval(session=tf.compat.v1.Session())
+            hid = np.matmul(acts, dropout_out) + b
+            acts = self.relu(hid)
+
 
         last_hidden = hid
         return last_hidden
