@@ -14,6 +14,7 @@ Options:
     --freeze-graph-model     Freeze weights of graph model components.
     --evaluate               example evaluation mode using a restored model
     --experiment             experiment
+    --sample                 limited data
     --pr NAME                type of problem file to retrieve
 """
 from __future__ import print_function
@@ -57,10 +58,12 @@ def target_to_adj_mat(target, max_n_vertices, num_edge_types, output_size, tie_f
 
     amat = np.zeros((num_edge_types, max_n_vertices, output_size))
     #amat = np.zeros((num_edge_types, max_n_vertices, max_n_vertices))
+
     for i, (src, e) in enumerate(target):
-        amat[e-1, i+1, src] = 1
-
-
+        try:
+            amat[e-1, i+1, src] = 1
+        except:
+            set_trace()
         # amat[e-1 + bwd_edge_offset, src] = 1
     return amat
 
@@ -69,6 +72,8 @@ def adj_mat_to_target(adj_mat, is_probability=False):
     graph = []
     for node in range(1, num_v):
         adj_mat_node = adj_mat[:, node, :]
+        if np.amax(adj_mat_node) == 0:
+            continue
         if is_probability:
             e_, src_ = np.where(adj_mat_node == np.amax(adj_mat_node))
         else:
@@ -78,7 +83,6 @@ def adj_mat_to_target(adj_mat, is_probability=False):
         if len(e_) > 1 or len(src_) >1:
             #TODO uncomment this
             print("adj matrix corrupted for node %d"%node)
-
 
         e = e_[0] + 1
         src = src_[0]
@@ -108,7 +112,6 @@ class DenseGGNNChemModel(ChemModel):
     def default_params(self):
         params = dict(super().default_params())
         params.update({
-                        'batch_size': 10,
                         'graph_state_dropout_keep_prob': 1.,
                         'task_sample_ratios': {},
                         'use_edge_bias': True,
@@ -178,7 +181,7 @@ class DenseGGNNChemModel(ChemModel):
                         m += self.weights['edge_biases'][edge_type]                                         # [b, v, h]
                     if edge_type == 0:
                         # __adjacency_matrix[edge_type] (b, v, v)
-                        acts = tf.matmul(self.__adjacency_matrix[edge_type], m) # (b, v, h)
+                        acts = tf.matmul(self.__adjacency_matrix[edge_type], m) # ID (e, b, v, h)   (b, v, h)
                     else:
                         acts += tf.matmul(self.__adjacency_matrix[edge_type], m)# (b, v, h)
 
@@ -205,8 +208,14 @@ class DenseGGNNChemModel(ChemModel):
         output_n = self.params['output_size']
         node_mask = self.placeholders['node_mask']
         softmax_mask = self.placeholders['softmax_mask']
-        if self.args['--pr'] == 'identity':
-            gated_outputs = tf.reshape(gated_outputs, [-1, e * v * output_n])
+
+        if self.args['--pr'] == 'molecule':
+            gated_outputs = tf.reshape(gated_outputs, [-1,v])  # [b, v]
+            masked_gated_outputs = gated_outputs * node_mask  # [b x v]
+            output = tf.reduce_sum(masked_gated_outputs, axis=1)  # [b]
+            self.output = output
+
+        elif self.args['--pr'] == 'identity':
             #TODO redo mask
             # gated_outputs = gated_outputs + softmax_mask       # ( b, e * v * o)
 
@@ -225,6 +234,14 @@ class DenseGGNNChemModel(ChemModel):
 
             # TODO redo mask
             # softmax = tf.math.multiply(softmax, node_mask)
+            self.output = tf.transpose(softmax)  # ID ( e * v * o,  b)
+            # TODO: delete
+            self.ops['last_h'] = last_h
+            self.ops['gate_input'] = gate_input
+            # self.ops['regression_gate'] = None
+            # self.ops['regression_transform'] = None
+            # self.ops['regression_gate'] = regression_gate(gate_input)
+            # self.ops['regression_transform'] = regression_transform(last_h)
 
         else:
             gated_outputs = tf.reshape(gated_outputs, [-1, v])  # [b, v]
@@ -233,14 +250,10 @@ class DenseGGNNChemModel(ChemModel):
             gated_outputs = gated_outputs * node_mask                            # [b x v]
             softmax = tf.nn.softmax(gated_outputs)
 
-        self.output = tf.transpose(softmax)   # ID ( e * v * o,  b)
-        #TODO: delete
-        self.ops['last_h'] = last_h
-        self.ops['gate_input'] = gate_input
-        # self.ops['regression_gate'] = None
-        # self.ops['regression_transform'] = None
-        # self.ops['regression_gate'] = regression_gate(gate_input)
-        # self.ops['regression_transform'] = regression_transform(last_h)
+            self.output = tf.transpose(softmax)   # ID ( e * v * o,  b)
+            #TODO: delete
+            self.ops['last_h'] = last_h
+            self.ops['gate_input'] = gate_input
 
         return self.output
 
@@ -329,24 +342,28 @@ class DenseGGNNChemModel(ChemModel):
             return [data_dict["targets"][task_id][0] for task_id in self.params['task_ids']]
         else:
             return [data_dict["targets"][task_id] + [0 for _ in range(chosen_bucket_size - n_active_nodes)] for task_id in self.params['task_ids']]
-    def pad_annotations(self, annotations, chosen_bucket_size):
+    def pad_annotations(self, annotations, chosen_bucket_size, adj_mat=None):
         if  self.args['--pr'] == 'identity':
             return self.annotations_padded_and_expanded(
                 annotations=annotations, max_n_vertices=chosen_bucket_size,
-                num_edge_types=self.num_edge_types)
+                num_edge_types=self.num_edge_types, adj_mat=adj_mat)
             # return np.pad(annotations, pad_width=[[0, 0], [0, 0], [0, self.params['hidden_size'] - self.annotation_size]], mode='constant')
         else:
             return np.pad(annotations,
                            pad_width=[[0, 0], [0, 0], [0, self.params['hidden_size'] - self.annotation_size]],
                            mode='constant')
 
-    def annotations_padded_and_expanded(self, annotations, max_n_vertices, num_edge_types):
-        new_annotations = []
-        for annotation in annotations:
-            amat = np.zeros((num_edge_types, max_n_vertices, self.params['hidden_size']))
-            new_annotations.append(amat)
+    def annotations_padded_and_expanded(self, annotations, max_n_vertices, num_edge_types, adj_mat):
 
-        return new_annotations
+        new_annotations = []
+        num_vertices = np.array(adj_mat).shape[-1]
+        return np.pad(adj_mat, pad_width=[[0, 0], [0, 0], [0, 0], [0, self.params['hidden_size'] - num_vertices]])
+        # TODO: delete?
+        # for annotation in annotations:
+        #     amat = np.zeros((num_edge_types, max_n_vertices, self.params['hidden_size']))
+        #     new_annotations.append(amat)
+
+        # return new_annotations
 
     def make_batch(self, elements):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [], 'softmax_mask': [], 'task_masks': []}
@@ -397,7 +414,8 @@ class DenseGGNNChemModel(ChemModel):
             initial_representations = batch_data['init']
 
             initial_representations = self.pad_annotations(
-                initial_representations, chosen_bucket_size=bucket_sizes[bucket])
+                initial_representations, chosen_bucket_size=bucket_sizes[bucket],
+                adj_mat=batch_data['adj_mat'])
             # padded_labels = self.pad_labels(labels=batch_data['labels'])
 
             batch_feed_dict = {
@@ -439,9 +457,9 @@ class DenseGGNNChemModel(ChemModel):
             for r in initial_node_representations:
                 node_masks.append([1. for _ in r] + [0. for _ in range(num_vertices - len(r))])
 
-
         batch_feed_dict = {
-            self.placeholders['initial_node_representation']: self.pad_annotations(initial_node_representations, chosen_bucket_size=num_vertices),
+            self.placeholders['initial_node_representation']: self.pad_annotations(
+                initial_node_representations, chosen_bucket_size=num_vertices, adj_mat=np.array(adjacency_matrices)),
             self.placeholders['num_graphs']: len(initial_node_representations),
             self.placeholders['num_vertices']: len(initial_node_representations[0]),
             self.placeholders['adjacency_matrix']: adjacency_matrices,
@@ -506,6 +524,7 @@ class DenseGGNNChemModel(ChemModel):
             result_reshaped = np.reshape(result_masked, [e, v, o])  # (e, v, o)
             target_graph = adj_mat_to_target(adj_mat=target)
             result_graph = adj_mat_to_target(adj_mat=result_reshaped, is_probability=True)
+
             print("target vs predicted: %s vs %s for sentence :'%s'" % (
                 target_graph, result_graph, sentence[:50]))
         else:
@@ -607,10 +626,18 @@ class DenseGGNNChemModel(ChemModel):
         gate_input = np.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])                           # [b*v, 2h]
         last_h = np.reshape(last_h, [-1, self.params["hidden_size"]])                                       # [b*v, h]
         gated_outputs = self.sigmoid_array(regression_gate(gate_input)) * regression_transform(last_h)           # [b*v, o]
+
         output_n = self.params['output_size']
         node_mask = batch_data['node_mask']
         softmax_mask = batch_data['softmax_mask']
-        if self.args['--pr'] == 'identity':
+
+        if self.args['--pr'] == 'molecule':
+            gated_outputs = np.reshape(gated_outputs, [-1,v])  # [b, v]
+            masked_gated_outputs = gated_outputs * node_mask  # [b , v]
+            output = np.sum(masked_gated_outputs, axis=1)  # [b]
+            self.output = output
+
+        elif self.args['--pr'] == 'identity':
             gated_outputs = np.reshape(gated_outputs, [-1, e * v * output_n])  # [b, v]
             gated_outputs = gated_outputs + softmax_mask
             #tranform it for calculating softmax correctly
@@ -621,15 +648,16 @@ class DenseGGNNChemModel(ChemModel):
             softmax = self.softmax(gated_outputs)  # ID ( b, v, e * o)
             softmax = np.reshape(softmax, [-1, v, e, output_n])  # ID ( b, v, e, o)
             softmax = np.transpose(softmax, [0, 2, 1, 3])  # ID ( b, e, v, o)
-            softmax = np.reshape(softmax, [-1, e * v * output_n])  # ID ( b * e * v * o)
+            softmax = np.reshape(softmax, [-1, e * v * output_n])  # ID (b, e * v * o)
             softmax = softmax * node_mask
+            self.output = np.transpose(softmax)
         else:
             gated_outputs = np.reshape(gated_outputs, [-1, v])  # [b, v]
             node_mask = np.reshape(node_mask, [-1, v])
             gated_outputs = gated_outputs * node_mask                              # [b x v]
             softmax = self.softmax(gated_outputs)
 
-        self.output = np.transpose(softmax)
+            self.output = np.transpose(softmax)
 
         return self.output
 

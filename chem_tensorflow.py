@@ -12,7 +12,7 @@ from pdb import set_trace
 from utils import MLP, ThreadedIterator, SMALL_NUMBER
 import sys
 sys.path.insert(1, '/Users/cristianmorales/Documents/Classes/Thesis/parser')
-from to_graph import dep_list
+from to_graph import dep_list, sample_dep_list
 
 dep_tree = True
 
@@ -25,8 +25,12 @@ def get_train_and_validation_files(args):
         valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_head.json'
 
     elif args.get('--pr') == 'identity':
-        train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_id.json'
-        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json'
+        if args.get('--sample'):
+            train_file = 'small_dev_id.json'
+            valid_file = 'small_test_id.json'
+        else:
+            train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_id.json'
+            valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json'
 
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
@@ -37,9 +41,16 @@ def get_train_and_validation_files(args):
 class ChemModel(object):
     # @classmethod
     def default_params(self):
-        train_file, valid_file = get_train_and_validation_files(self.args)
 
+        if self.args.get('--sample'):
+            return self.get_id_sample_params()
+        else:
+            return self.get_id_params()
+
+    def get_id_params(self):
+        train_file, valid_file = get_train_and_validation_files(self.args)
         return {
+            'batch_size': 10,
             'num_epochs': 1,
             'patience': 25,
             'learning_rate': 0.001,
@@ -58,6 +69,30 @@ class ChemModel(object):
             'train_file': train_file,
             'valid_file': valid_file,
             'output_size': 1 if self.args['--pr'] != 'identity' else 150
+        }
+
+    def get_id_sample_params(self):
+        train_file, valid_file = get_train_and_validation_files(self.args)
+        return {
+            'batch_size': 3,
+            'num_epochs': 10,
+            'patience': 25,
+            'learning_rate': 0.001,
+            'clamp_gradient_norm': 1.0,
+            'out_layer_dropout_keep_prob': 1.0,
+
+            'hidden_size': 10,
+            'num_timesteps': 4,
+            'use_graph': True,
+
+            'tie_fwd_bkwd': True,
+            'task_ids': [0],
+
+            'random_seed': 0,
+
+            'train_file': train_file,
+            'valid_file': valid_file,
+            'output_size': 1 if self.args['--pr'] != 'identity' else 6
         }
 
     def __init__(self, args):
@@ -97,9 +132,9 @@ class ChemModel(object):
         self.max_num_vertices = 0
         self.num_edge_types = 0
         self.annotation_size = 0
+        self.dep_list = sample_dep_list if self.args.get('--sample') else dep_list
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
-
         # Build the actual model
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -142,14 +177,14 @@ class ChemModel(object):
 
         # Get some common data out:
         num_fwd_edge_types = 0
-
         for g in data:
             if len( g['graph']) == 0:
                 continue
             self.max_num_vertices = max(self.max_num_vertices, max([v for e in g['graph'] for v in [e[0], e[2]]]))
 
             num_fwd_edge_types = max(num_fwd_edge_types, max([e[1] for e in g['graph']]))
-        self.num_edge_types = max([len(dep_list), self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2)])
+
+        self.num_edge_types = max([len(self.dep_list), self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2)])
 
         self.annotation_size = max(self.annotation_size, len(data[0]["node_features"][0]))
 
@@ -381,7 +416,6 @@ class ChemModel(object):
 
             loss = result[0]
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
-
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
             writer.add_summary(batch_summary, start_step + step)
