@@ -16,6 +16,7 @@ Options:
     --experiment             experiment
     --sample                 limited data
     --pr NAME                type of problem file to retrieve
+    --max                    max number of examples to train/validate
 """
 from __future__ import print_function
 from typing import Sequence, Any
@@ -158,7 +159,7 @@ class DenseGGNNChemModel(ChemModel):
         e = self.num_edge_types
         h_dim = self.params['hidden_size']
         h = self.placeholders['initial_node_representation']   # ID: (b, e, v, h) else : (b, v, h)                    # [b, v, h]
-        h = tf.reshape(h, [-1, h_dim])  # ID: (b * e * v, h)
+        h = tf.reshape(h, [-1, h_dim])  # ID: (b * e * v, h) else : (b * v, h)
 
         with tf.variable_scope("gru_scope") as scope:
             for i in range(self.params['num_timesteps']):
@@ -357,6 +358,7 @@ class DenseGGNNChemModel(ChemModel):
 
         new_annotations = []
         num_vertices = np.array(adj_mat).shape[-1]
+
         return np.pad(adj_mat, pad_width=[[0, 0], [0, 0], [0, 0], [0, self.params['hidden_size'] - num_vertices]])
         # TODO: delete?
         # for annotation in annotations:
@@ -720,12 +722,11 @@ def main():
     if args['--evaluate']:
         if args['--restore'] is None:
             os.chdir(".")
-            best_models_list = sorted(glob.glob("*.pickle"), reverse=True)
-            best_model = best_models_list[0]
             log_dir = args.get('--log_dir') or '.'
-            best_model_file = os.path.join(log_dir, best_model)
-            args['--restore'] = best_model_file
-            print("restoring best model: %s" %best_model_file)
+            best_models_list = sorted(glob.glob(os.path.join(log_dir,"*.pickle")), reverse=True)
+            best_model = best_models_list[0]
+            args['--restore'] = best_model
+            print("restoring best model: %s" %best_model)
 
         model = DenseGGNNChemModel(args)
         model.example_evaluation()

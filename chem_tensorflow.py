@@ -51,9 +51,9 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
             'batch_size': 10,
-            'num_epochs': 1,
+            'num_epochs': 2,
             'patience': 25,
-            'learning_rate': 0.001,
+            'learning_rate': 0.05,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
@@ -75,9 +75,9 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
             'batch_size': 3,
-            'num_epochs': 10,
+            'num_epochs': 200,
             'patience': 25,
-            'learning_rate': 0.001,
+            'learning_rate': 0.01,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
@@ -148,7 +148,7 @@ class ChemModel(object):
             self.ops = {}
             self.make_model()
 
-            if not self.args['--experiment']:
+            if not self.args.get('--experiment'):
                 self.make_train_step()
                 self.make_summaries()
 
