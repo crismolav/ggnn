@@ -11,7 +11,7 @@ import tensorflow as tf
 from pdb import set_trace
 from utils import MLP, ThreadedIterator, SMALL_NUMBER
 import sys
-sys.path.insert(1, '/Users/cristianmorales/Documents/Classes/Thesis/parser')
+sys.path.insert(1, '/Users/cristianmorales/Documents/Classes/Thesis/gated-graph-neural-network-samples/parser')
 from to_graph import dep_list, sample_dep_list
 
 dep_tree = True
