@@ -45,3 +45,45 @@ class ChemTests(unittest.TestCase):
 
 
         self.assertTrue((expected == result).all())
+
+    def test_get_las_uas__perfect_match(self):
+        target_graph = [[1,1],[2,0],[2,2]]
+        result_graph = [[1,1],[2,0],[2,2]]
+
+        result = chem_tfd.DenseGGNNChemModel.get_las_uas(
+            target_graph=target_graph, result_graph=result_graph)
+        expected = 1, 1
+
+        self.assertEqual(expected, result)
+
+    def test_get_las_uas__one_edge_type_different(self):
+        target_graph = [[1, 1], [2, 0], [2, 2]]
+        result_graph = [[1, 1], [2, 1], [2, 2]]
+
+        result = chem_tfd.DenseGGNNChemModel.get_las_uas(
+            target_graph=target_graph, result_graph=result_graph)
+        expected = 2/3, 1
+
+        self.assertEqual(expected, result)
+
+    def test_get_las_uas__all_edge_types_different(self):
+        target_graph = [[1, 1], [2, 0], [2, 2]]
+        result_graph = [[1, 0], [2, 1], [2, 1]]
+
+        result = chem_tfd.DenseGGNNChemModel.get_las_uas(
+            target_graph=target_graph, result_graph=result_graph)
+        expected = 0, 1
+
+        self.assertEqual(expected, result)
+
+    def test_get_las_uas__all_different_nodes(self):
+        target_graph = [[1, 1], [2, 0], [2, 2]]
+        result_graph = [[2, 1], [1, 0], [3, 2]]
+
+        result = chem_tfd.DenseGGNNChemModel.get_las_uas(
+            target_graph=target_graph, result_graph=result_graph)
+        expected = 0, 0
+
+        self.assertEqual(expected, result)
+
+

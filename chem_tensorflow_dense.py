@@ -15,8 +15,10 @@ Options:
     --evaluate               example evaluation mode using a restored model
     --experiment             experiment
     --sample                 limited data
+    --restrict_data K        max number of examples to train/validate
+    --skip_data K            skips first K number of data samples.
     --pr NAME                type of problem file to retrieve
-    --max                    max number of examples to train/validate
+    --test_with_train        test with training data
 """
 from __future__ import print_function
 from typing import Sequence, Any
@@ -33,7 +35,6 @@ from chem_tensorflow import ChemModel, get_train_and_validation_files
 from utils import glorot_init, MLP2
 import os
 import glob, os
-
 
 
 def graph_to_adj_mat(graph, max_n_vertices, num_edge_types, tie_fwd_bkwd=True):
@@ -68,7 +69,7 @@ def target_to_adj_mat(target, max_n_vertices, num_edge_types, output_size, tie_f
         # amat[e-1 + bwd_edge_offset, src] = 1
     return amat
 
-def adj_mat_to_target(adj_mat, is_probability=False):
+def adj_mat_to_target(adj_mat, is_probability=False, true_target=None):
     num_e, num_v, num_o = adj_mat.shape
     graph = []
     for node in range(1, num_v):
@@ -82,15 +83,18 @@ def adj_mat_to_target(adj_mat, is_probability=False):
         if len(e_) == 0:
             continue
         if len(e_) > 1 or len(src_) >1:
-            #TODO uncomment this
-            print("adj matrix corrupted for node %d"%node)
+            pass
+            # print("adj matrix corrupted for node %d :(%d, %d, %d)"%(
+            #     node, true_target[node-1][0], true_target[node-1][1], node))
 
         e = e_[0] + 1
         src = src_[0]
         edge = [src, e]
         graph.append(edge)
 
+
     return graph
+
 
 '''
 Comments provide the expected tensor shapes where helpful.
@@ -170,7 +174,7 @@ class DenseGGNNChemModel(ChemModel):
                     m = tf.matmul(h, tf.nn.dropout(
                         self.weights['edge_weights'][edge_type],
                         keep_prob=self.placeholders['edge_weight_dropout_keep_prob'])) # ID: (b*e*v) else : [b*v, h]
-                    del1 = tf.matmul(h, tf.nn.dropout(self.weights['edge_weights'][edge_type], keep_prob=self.placeholders['edge_weight_dropout_keep_prob'])) # [b*v, h]
+
                     self.ops['del1'] = self.weights['edge_weights'][edge_type]
                     if self.args['--pr'] == 'identity':
                         m = tf.reshape(m, [-1, e, v, h_dim])
@@ -236,9 +240,6 @@ class DenseGGNNChemModel(ChemModel):
             # TODO redo mask
             # softmax = tf.math.multiply(softmax, node_mask)
             self.output = tf.transpose(softmax)  # ID ( e * v * o,  b)
-            # TODO: delete
-            self.ops['last_h'] = last_h
-            self.ops['gate_input'] = gate_input
             # self.ops['regression_gate'] = None
             # self.ops['regression_transform'] = None
             # self.ops['regression_gate'] = regression_gate(gate_input)
@@ -251,10 +252,7 @@ class DenseGGNNChemModel(ChemModel):
             gated_outputs = gated_outputs * node_mask                            # [b x v]
             softmax = tf.nn.softmax(gated_outputs)
 
-            self.output = tf.transpose(softmax)   # ID ( e * v * o,  b)
-            #TODO: delete
-            self.ops['last_h'] = last_h
-            self.ops['gate_input'] = gate_input
+            self.output = tf.transpose(softmax)
 
         return self.output
 
@@ -295,27 +293,28 @@ class DenseGGNNChemModel(ChemModel):
                         for ex_id in range(ex_to_sample, len(bucket)):
                             bucket[ex_id]['labels'][task_id] = None
 
-        bucket_at_step = [[bucket_idx for _ in range(len(bucket_data) // self.params['batch_size'])]
+        bucket_at_step = [[bucket_idx for _ in range(1 + (len(bucket_data)-1) // self.params['batch_size'])]
                           for bucket_idx, bucket_data in bucketed.items()]
         bucket_at_step = [x for y in bucket_at_step for x in y]
+        # if not is_training_data:
 
         return (bucketed, bucket_sizes, bucket_at_step)
 
     def get_mask(self, n_active_nodes, chosen_bucket_size):
+        #TODO:test
         if self.args['--pr'] == 'identity':
-            mask = np.ones((self.num_edge_types, n_active_nodes))
+            mask = np.ones((self.num_edge_types, n_active_nodes))  # (e, v')
             if chosen_bucket_size - n_active_nodes>0:
                 #TODO fix this to output in the format of gated_outputs
                 mask_zero = np.zeros((self.num_edge_types, chosen_bucket_size - n_active_nodes))
-                mask = np.concatenate([mask, mask_zero], axis =-1)
+                mask = np.concatenate([mask, mask_zero], axis =-1) # (e, v)
 
-            final_mask = np.reshape(mask, [-1,1])
-            final_mask = np.tile(final_mask, [1, n_active_nodes])
-
+            final_mask = np.reshape(mask, [-1,1]) # (e * v, 1)
+            final_mask = np.tile(final_mask, [1, n_active_nodes]) # (e * v, v')
             output_zeros = np.zeros((final_mask.shape[0], self.params['output_size'] - n_active_nodes))
-            final_mask = np.concatenate([final_mask, output_zeros], axis=-1)
+            final_mask = np.concatenate([final_mask, output_zeros], axis=-1) # (e * v, o)
 
-            return final_mask
+            return final_mask  # (e * v, o)
         else:
             return [1. for _ in range(n_active_nodes) ] + [0. for _ in range(chosen_bucket_size - n_active_nodes)]
 
@@ -357,6 +356,7 @@ class DenseGGNNChemModel(ChemModel):
     def annotations_padded_and_expanded(self, annotations, max_n_vertices, num_edge_types, adj_mat):
 
         new_annotations = []
+
         num_vertices = np.array(adj_mat).shape[-1]
 
         return np.pad(adj_mat, pad_width=[[0, 0], [0, 0], [0, 0], [0, self.params['hidden_size'] - num_vertices]])
@@ -387,8 +387,11 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['labels'].append(target_task_values)
             batch_data['task_masks'].append(target_task_mask)
         if self.args['--pr'] == 'identity':
-            batch_data['node_mask'] = np.reshape(batch_data['node_mask'], [len(elements), -1])
-            batch_data['softmax_mask'] = np.reshape(batch_data['softmax_mask'], [len(elements), -1])
+            try:
+                batch_data['node_mask'] = np.reshape(batch_data['node_mask'], [len(elements), -1])
+                batch_data['softmax_mask'] = np.reshape(batch_data['softmax_mask'], [len(elements), -1])
+            except:
+                set_trace()
 
         return batch_data
 
@@ -404,12 +407,10 @@ class DenseGGNNChemModel(ChemModel):
         dropout_keep_prob = self.params['graph_state_dropout_keep_prob'] if is_training else 1.
 
         for step in range(len(bucket_at_step)):
-
             bucket = bucket_at_step[step]
             start_idx = bucket_counters[bucket] * self.params['batch_size']
             end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
             elements = bucketed[bucket][start_idx:end_idx]
-
             batch_data = self.make_batch(elements)
 
             num_graphs = len(batch_data['init'])
@@ -419,7 +420,6 @@ class DenseGGNNChemModel(ChemModel):
                 initial_representations, chosen_bucket_size=bucket_sizes[bucket],
                 adj_mat=batch_data['adj_mat'])
             # padded_labels = self.pad_labels(labels=batch_data['labels'])
-
             batch_feed_dict = {
                 self.placeholders['initial_node_representation']: initial_representations,
                 self.placeholders['target_values']: np.transpose(np.array(batch_data['labels'])),
@@ -482,7 +482,7 @@ class DenseGGNNChemModel(ChemModel):
         ''' Demonstration of what test-time code would look like
         we query the model with the first n_example_molecules from the validation file
         '''
-        n_example_molecules = 30
+        n_example_molecules = 3
         train_file_, valid_file_ = get_train_and_validation_files(self.args)
         with open(valid_file_) as valid_file:
         #with open('molecules_valid.json', 'r') as valid_file:
@@ -493,31 +493,55 @@ class DenseGGNNChemModel(ChemModel):
         # BUG: I think the code had a bug here
         # batch_data = self.make_batch(example_molecules[0])
 
+        acc_las, acc_uas = 0, 0
+        total_examples = 0
         for value in example_molecules.keys():
+            b = len(example_molecules[value])
             # print(self.evaluate_one_batch(batch_data['init'], batch_data['adj_mat']))
-            self.evaluate_results(example_molecules, value)
+            las, uas = self.evaluate_results(example_molecules[value])
+            total_examples += b
+            acc_las += las * b
+            acc_uas += uas * b
 
-    def evaluate_results(self, example_molecules, value):
-        batch_data = self.make_batch(example_molecules[value])
+        acc_las = acc_las / total_examples
+        acc_uas = acc_uas / total_examples
+        print("Attachment scores - LAS : %.2f - UAS : %.2f" % (acc_las, acc_uas))
+
+    def evaluate_results(self, data_for_batch):
+
+        batch_data = self.make_batch(data_for_batch)
         if self.args['--pr'] == 'identity':
             targets_and_sentence = [(x['labels'], x['raw_sentence']) for x in
-                                    example_molecules[value]]
+                                    data_for_batch]
             node_masks = batch_data['node_mask']
             softmax_mask = batch_data['softmax_mask']
         else:
-            targets_and_sentence = [(x['labels'][0], x['raw_sentence']) for x in example_molecules[value]]
+            targets_and_sentence = [(x['labels'][0], x['raw_sentence']) for x in data_for_batch]
             node_masks = np.transpose(batch_data['node_mask'])
             softmax_mask = np.transpose(batch_data['softmax_mask'])
 
         results = self.evaluate_one_batch(
             batch_data['init'], batch_data['adj_mat'],
             node_masks = node_masks, softmax_mask=softmax_mask)
-        results = np.transpose(results) # (b, e * v * o)
+        results = np.transpose(results)  # (b, e * v * o)
+
         for i, result in enumerate(results):
             target, sentence = targets_and_sentence[i]
             mask = node_masks[i]
             # print("target vs predicted: %d vs %.2f for sentence :'%s'"%(target, result, sentence[:50]))
             self.interpret_result(target, sentence, result, mask)
+
+        if self.args['--pr'] == 'identity':
+            b, e, v, o = np.array(batch_data['labels']).shape
+            targets = np.reshape(np.array(batch_data['labels']), [b, -1])
+            targets = np.transpose(targets)
+            results = np.transpose(results)
+            las, uas = self.get_batch_attachment_scores(
+                targets=targets, computed_values=results,
+                mask=batch_data['node_mask'], num_vertices=v)
+            # print("Attachment scores - LAS : %.2f - UAS : %.2f" % (las, uas))
+            return las, uas
+
 
     def interpret_result(self, target, sentence, result, mask):
         if self.args['--pr'] == 'identity':
@@ -525,13 +549,90 @@ class DenseGGNNChemModel(ChemModel):
             result_masked = np.multiply(result, mask)
             result_reshaped = np.reshape(result_masked, [e, v, o])  # (e, v, o)
             target_graph = adj_mat_to_target(adj_mat=target)
-            result_graph = adj_mat_to_target(adj_mat=result_reshaped, is_probability=True)
+            result_graph = adj_mat_to_target(
+                adj_mat=result_reshaped, is_probability=True, true_target=target_graph)
 
-            print("target vs predicted: %s vs %s for sentence :'%s'" % (
+            print("target vs predicted: \n%s vs \n%s for sentence :'%s'" % (
                 target_graph, result_graph, sentence[:50]))
         else:
             print("target vs predicted: %d vs %.0f for sentence :'%s'" % (
                 target.index(1), np.argmax(result), sentence[:50]))
+
+    def get_batch_attachment_scores(self, targets, computed_values, mask, num_vertices):
+        if self.args['--pr'] != "identity":
+            return 0, 0
+        # mask (b,  e * v * o,)
+        # computed_values (e * v * o, b)
+        # target = labels (e * v * o, b)
+        e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
+        results = np.transpose(computed_values) # (b, e * v * o)
+        results_masked = np.multiply(results, mask) # (b, e * v * o)
+        results_reshaped = np.reshape(results_masked, [-1, e, v, o])  # (b, e, v, o)
+
+        targets = np.transpose(targets) # (b, e * v * o)
+        targets_reshaped = np.reshape(targets, [-1, e, v, o])
+        acc_las = 0
+        acc_uas = 0
+        b = targets.shape[0]
+        for i, result in enumerate(results_reshaped):
+            target = targets_reshaped[i]
+            target_graph = adj_mat_to_target(adj_mat=target)
+
+            result_graph = adj_mat_to_target(
+                adj_mat=result, is_probability=True, true_target=target_graph)
+
+            las, uas = self.get_las_uas(target_graph, result_graph)
+
+            acc_las += las
+            acc_uas += uas
+
+        return acc_las/b, acc_uas/b
+
+    def print_all_results_as_graph(
+            self, all_labels, all_computed_values, all_num_vertices, all_masks):
+        for i, computed_values in enumerate(all_computed_values):
+            labels = all_labels[i]
+            num_vertices = all_num_vertices[i]
+            mask = all_masks[i]
+
+            self.print_batch_results_as_graph(
+                labels=labels, computed_values=computed_values,
+                num_vertices=num_vertices, mask=mask)
+
+
+    def print_batch_results_as_graph(self, labels, computed_values, num_vertices, mask):
+        e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
+        results = np.transpose(computed_values)  # (b, e * v * o)
+        results_masked = np.multiply(results, mask)  # (b, e * v * o)
+        results_reshaped = np.reshape(results_masked, [-1, e, v, o])  # (b, e, v, o)
+
+        targets = np.transpose(labels)  # (b, e * v * o)
+        targets_reshaped = np.reshape(targets, [-1, e, v, o])
+
+        for i, result in enumerate(results_reshaped):
+            target = targets_reshaped[i]
+            target_graph = adj_mat_to_target(adj_mat=target)
+
+            result_graph = adj_mat_to_target(
+                adj_mat=result, is_probability=True, true_target=target_graph)
+            print("target vs predicted: \n%s vs \n%s" % (
+                target_graph, result_graph))
+
+    @staticmethod
+    def get_las_uas(target_graph, result_graph):
+        las = 0
+        uas = 0
+        total_edges = len(result_graph)
+        for i, result_edge in enumerate(result_graph):
+            target_edge = target_graph[i]
+            if target_edge == result_edge:
+                las += 1
+                uas += 1
+            elif target_edge[0] == result_edge[0]:
+                uas += 1
+
+        return las/total_edges, uas/total_edges
+
 
     def to_real_target(self, target):
         new_target = np.transpose(target)
@@ -679,14 +780,16 @@ class DenseGGNNChemModel(ChemModel):
             start_idx = bucket_counters[bucket] * self.params['batch_size']
             end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
             elements = bucketed[bucket][start_idx:end_idx]
-
+            if elements == []:
+                set_trace()
             batch_data = self.make_batch(elements)
 
             num_graphs = len(batch_data['init'])
             initial_representations = batch_data['init']
 
             initial_representations = self.pad_annotations(
-                initial_representations, chosen_bucket_size=bucket_sizes[bucket])
+                initial_representations, chosen_bucket_size=bucket_sizes[bucket],
+                adj_mat=batch_data['adj_mat'])
 
             # padded_labels = self.pad_labels(labels=batch_data['labels'])
             batch_feed_dict = {

@@ -19,22 +19,22 @@ dep_tree = True
 def get_train_and_validation_files(args):
     if args.get('--pr') == 'root':
         train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged.json'
-        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged.json'
+        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged.json' if not args.get('--test_with_train') else train_file
     elif args.get('--pr') == 'head':
         train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_head.json'
-        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_head.json'
+        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_head.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'identity':
         if args.get('--sample'):
             train_file = 'small_dev_id.json'
-            valid_file = 'small_test_id.json'
+            valid_file = 'small_test_id.json' if not args.get('--test_with_train') else train_file
         else:
             train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_id.json'
-            valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json'
+            valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
-        valid_file = 'molecules_valid.json'
+        valid_file = 'molecules_valid.json' if not args.get('--test_with_train') else train_file
 
     return train_file, valid_file
 
@@ -51,9 +51,9 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
             'batch_size': 10,
-            'num_epochs': 2,
+            'num_epochs': 200,
             'patience': 25,
-            'learning_rate': 0.05,
+            'learning_rate': 0.002,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
@@ -135,6 +135,7 @@ class ChemModel(object):
         self.dep_list = sample_dep_list if self.args.get('--sample') else dep_list
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
+
         # Build the actual model
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -172,8 +173,13 @@ class ChemModel(object):
             data = json.load(f)
 
         restrict = self.args.get("--restrict_data")
-        if restrict is not None and restrict > 0:
-            data = data[:restrict]
+        skip = self.args.get("--skip_data")
+
+        if skip is not None and int(skip) > 0:
+            data = data[int(skip):]
+
+        if restrict is not None and int(restrict) > 0:
+            data = data[:int(restrict)]
 
         # Get some common data out:
         num_fwd_edge_types = 0
@@ -240,7 +246,7 @@ class ChemModel(object):
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
-                                                        self.weights['regression_transform_task%i' % task_id])
+                                                        self.weights['regression_transform_task%i' % task_id]) # ID ( e * v * o,  b)
                 task_target_mask = self.placeholders['target_mask'][internal_id, :]
                 task_target_num = tf.reduce_sum(task_target_mask) + SMALL_NUMBER
 
@@ -250,8 +256,8 @@ class ChemModel(object):
                 elif self.args['--pr'] == 'identity':
                     labels = self.placeholders['target_values']  # (o,v,e,b)
                     labels = tf.transpose(labels, [2, 1, 0, 3])  # (e,v,o,b)
-                    labels = tf.reshape(labels, [-1, self.placeholders['num_graphs']]) # (e*v*o,b)
-                    mask = tf.transpose(self.placeholders['node_mask'])  # (e*v*o,b)
+                    labels = tf.reshape(labels, [-1, self.placeholders['num_graphs']]) # (e * v * o,b)
+                    mask = tf.transpose(self.placeholders['node_mask'])  # (e * v * o,b)
                 else:
                     labels = self.placeholders['target_values'][:, internal_id, :]
                     mask = tf.transpose(self.placeholders['node_mask'])
@@ -275,12 +281,7 @@ class ChemModel(object):
                     self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
                 else:
                     new_mask = tf.cast(mask, tf.bool)
-                    #TODO: delete these two
-                    masked_computed_values = tf.boolean_mask(computed_values, mask= new_mask)
-                    masked_labels = tf.boolean_mask(labels, mask= new_mask)
-
                     masked_loss = tf.boolean_mask(labels * tf.log(computed_values), mask= new_mask)
-                    #TODO: change mean for sum
                     task_loss = tf.reduce_sum(-1*masked_loss)/task_target_num
                     #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
 
@@ -293,8 +294,6 @@ class ChemModel(object):
                     self.ops['accuracy_task%i' % task_id] = task_loss
                     self.ops['losses'].append(task_loss)
                     self.ops['computed_values'] = computed_values
-                    self.ops['masked_computed_values'] = masked_computed_values
-                    self.ops['masked_labels'] = masked_labels
                     self.ops['labels'] = labels
                     self.ops['masked_loss'] = masked_loss
                     self.ops['new_mask'] =  new_mask
@@ -369,11 +368,11 @@ class ChemModel(object):
         start_time = time.time()
         processed_graphs = 0
         steps = 0
-
+        acc_las, acc_uas = 0, 0
         batch_iterator = ThreadedIterator(self.make_minibatch_iterator(data, is_training), max_queue_size=5)
+        all_labels, all_computed_values, all_num_vertices, all_masks = [], [], [], []
 
         for step, batch_data in enumerate(batch_iterator):
-            iteration = step
             num_graphs = batch_data[self.placeholders['num_graphs']]
             processed_graphs += num_graphs
             if is_training:
@@ -383,45 +382,52 @@ class ChemModel(object):
                               self.ops['labels'], self.ops['computed_values'],
                               self.ops['final_node_representations'],
                               self.placeholders['node_mask'], self.ops['losses'],
-                              self.ops['masked_labels'], self.ops['masked_computed_values'],
                               self.ops['masked_loss'], self.ops['new_mask'],
-                              self.ops['last_h'], self.ops['gate_input'],
                               self.placeholders['initial_node_representation'],
                               self.weights['edge_weights'], self.weights['edge_biases'],
-                              self.ops['del1']
+                              self.weights['regression_transform_task%i' % 0].params['weights'],
+                              self.placeholders['num_vertices']
                               ]
-                              # self.weights['regression_gate_task0'],
-                              # self.weights['regression_transform_task0']]
+
             else:
+                # it is not trainining because we are not requesting the self.ops['train_step'] parametr
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
-                fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary']]
+                fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
+                              self.weights['edge_weights'], self.weights['edge_biases'],
+                              self.ops['final_node_representations'],
+                              self.weights['regression_transform_task%i' % 0].params['weights'],
+                              self.ops['labels'], self.ops['computed_values'],
+                              self.placeholders['node_mask'], self.placeholders['num_vertices']]
 
             result = self.sess.run(fetch_list, feed_dict=batch_data)
             #TODO: delete
 
-            # labels = result[4]
-            # computed_values = result[5]
-            # final_node_representations = result[6]
-            # node_mask = result[7]
+            labels = result[4] if is_training else result[7]
+            computed_values = result[5] if is_training else result[8]
+            final_node_representations = result[6] if is_training else result[5]
+            node_mask = result[7] if is_training else result[9]
             # masked_labels = result[9]
-            # masked_computed_values = result[10]
-            # masked_loss = result[11]
-            # inv_mask = result[12]
-            # last_h = result[13]
-            # gate_input = result[14]
-            # initial_node_representation = result[15]
-            # edge_weights = result[16]
-            # edge_biases = result[17]
-            # del1 = result[18]
-
+            # inv_mask = result[10]
+            # last_h = result[11]
+            # gate_input = result[12]
+            # initial_node_representation = result[11]
+            edge_weights = result[12] if is_training else result[3]
+            edge_biases = result[13]if is_training else result[4]
+            regression_transform_task = result[14]if is_training else result[6]
+            num_vertices = result[15] if is_training else result[10]
             loss = result[0]
+
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
             writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
-
+            las, uas = self.get_batch_attachment_scores(
+                targets=labels, computed_values= computed_values,
+                mask=node_mask, num_vertices=num_vertices)
+            acc_las += las * num_graphs
+            acc_uas += uas * num_graphs
             print("Running %s, batch %i (has %i graphs). Loss so far: %.4f" % (epoch_name,
                                                                                step,
                                                                                num_graphs,
@@ -429,18 +435,32 @@ class ChemModel(object):
                   end='\r')
             steps += 1
 
+            all_labels.append(labels)
+            all_computed_values.append(computed_values)
+            all_num_vertices.append(num_vertices)
+            all_masks.append(node_mask)
+
         accuracies = np.sum(accuracies, axis=0) / processed_graphs
         loss = loss / processed_graphs
         error_ratios = accuracies / chemical_accuracies[self.params["task_ids"]]
         instance_per_sec = processed_graphs / (time.time() - start_time)
-        return loss, accuracies, error_ratios, instance_per_sec, steps
+        acc_las = acc_las / processed_graphs
+        acc_uas = acc_uas / processed_graphs
+
+        if acc_las > 0.96:
+            self.print_all_results_as_graph(
+                all_labels=all_labels, all_computed_values=all_computed_values,
+                all_num_vertices=all_num_vertices, all_masks=all_masks)
+
+        return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas
 
     def train(self):
         log_to_save = []
         total_time_start = time.time()
         with self.graph.as_default():
             if self.args.get('--restore') is not None:
-                _, valid_accs, _, _, steps = self.run_epoch("Resumed (validation)", self.valid_data, False)
+                _, valid_accs, _, _, steps, valid_las, valid_uas = \
+                    self.run_epoch("Resumed (validation)", self.valid_data, False)
                 best_val_acc = np.sum(valid_accs)
                 best_val_acc_epoch = 0
                 print("\r\x1b[KResumed operation, initial cum. val. acc: %.5f" % best_val_acc)
@@ -448,8 +468,8 @@ class ChemModel(object):
                 (best_val_acc, best_val_acc_epoch) = (float("+inf"), 0)
             for epoch in range(1, self.params['num_epochs'] + 1):
                 print("== Epoch %i" % epoch)
-                train_loss, train_accs, train_errs, train_speed, train_steps = self.run_epoch("epoch %i (training)" % epoch,
-                                                                                              self.train_data, True, self.train_step_id)
+                train_loss, train_accs, train_errs, train_speed, train_steps, train_las, train_uas = \
+                    self.run_epoch("epoch %i (training)" % epoch, self.train_data, True, self.train_step_id)
                 self.train_step_id += train_steps
                 accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in zip(self.params['task_ids'], train_accs)])
                 errs_str = " ".join(["%i:%.5f" % (id, err) for (id, err) in zip(self.params['task_ids'], train_errs)])
@@ -457,17 +477,18 @@ class ChemModel(object):
                                                                                                         accs_str,
                                                                                                         errs_str,
                                                                                                         train_speed))
-
-                valid_loss, valid_accs, valid_errs, valid_speed, valid_steps = self.run_epoch("epoch %i (validation)" % epoch,
-                                                                                              self.valid_data, False, self.valid_step_id)
+                print("Train Attachment scores - LAS : %.2f - UAS : %.2f" % (train_las, train_uas))
+                valid_loss, valid_accs, valid_errs, valid_speed, valid_steps, valid_las, valid_uas = \
+                    self.run_epoch("epoch %i (validation)" % epoch, self.valid_data, False, self.valid_step_id)
                 self.valid_step_id += valid_steps
+
                 accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in zip(self.params['task_ids'], valid_accs)])
                 errs_str = " ".join(["%i:%.5f" % (id, err) for (id, err) in zip(self.params['task_ids'], valid_errs)])
                 print("\r\x1b[K Valid: loss: %.5f | acc: %s | error_ratio: %s | instances/sec: %.2f" % (valid_loss,
                                                                                                         accs_str,
                                                                                                         errs_str,
                                                                                                         valid_speed))
-
+                print("Valid Attachment scores - LAS : %.2f - UAS : %.2f" % (valid_las, valid_uas))
                 epoch_time = time.time() - total_time_start
                 log_entry = {
                     'epoch': epoch,
@@ -479,7 +500,10 @@ class ChemModel(object):
                 with open(self.log_file, 'w') as f:
                     json.dump(log_to_save, f, indent=4)
 
-                val_acc = np.sum(valid_accs)  # type: float
+                #TODO: reconsider this change, we are now using loss as accuracy
+                # val_acc = np.sum(valid_accs)  # type: float
+                val_acc = 1-valid_las
+                # if val_acc < best_val_acc:
                 if val_acc < best_val_acc:
                     self.save_progress(self.best_model_file, self.train_step_id, self.valid_step_id)
                     print("  (Best epoch so far, cum. val. acc decreased to %.5f from %.5f. Saving to '%s')" % (
@@ -520,9 +544,12 @@ class ChemModel(object):
         # Assert that we got the same model configuration
         assert len(self.params) == len(data_to_load['params'])
         for (par, par_value) in self.params.items():
+            if self.args.get('--test_with_train') and par == 'valid_file':
+                continue
             # Fine to have different task_ids:
             if par not in ['task_ids', 'num_epochs']:
                 assert par_value == data_to_load['params'][par]
+
 
         variables_to_initialize = []
         with tf.name_scope("restore"):
