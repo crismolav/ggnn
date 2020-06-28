@@ -51,14 +51,14 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
             'batch_size': 10,
-            'num_epochs': 200,
+            'num_epochs': 400,
             'patience': 25,
-            'learning_rate': 0.002,
+            'learning_rate': 0.001,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
             'hidden_size': 250,
-            'num_timesteps': 4,
+            'num_timesteps': 1,
             'use_graph': True,
 
             'tie_fwd_bkwd': True,
@@ -324,7 +324,7 @@ class ChemModel(object):
                 else:
                     print("Freezing weights of variable %s." % var.name)
             trainable_vars = filtered_vars
-        optimizer = tf.train.AdamOptimizer(self.params['learning_rate'])
+        optimizer = tf.train.AdamOptimizer(self.params['learning_rate'],beta1=0.9, beta2=0.999)
 
         grads_and_vars = optimizer.compute_gradients(self.ops['loss'], var_list=trainable_vars)
         clipped_grads = []
@@ -375,46 +375,48 @@ class ChemModel(object):
         for step, batch_data in enumerate(batch_iterator):
             num_graphs = batch_data[self.placeholders['num_graphs']]
             processed_graphs += num_graphs
+            fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
+                          self.ops['labels'], self.ops['computed_values'],
+                          self.ops['final_node_representations'],
+                          self.placeholders['node_mask'], self.ops['losses'],
+                          self.ops['masked_loss'], self.ops['new_mask'],
+                          self.placeholders['initial_node_representation'],
+                          self.weights['edge_weights'], self.weights['edge_biases'],
+                          self.weights['regression_transform_task%i' % 0].params['weights'],
+                          self.placeholders['num_vertices'], self.ops['acts'],
+                          self.ops['m'], self.placeholders['adjacency_matrix'],
+                          self.ops['edge_weights'], self.ops['h'], self.ops['h_gru'],
+                          self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
+                          ]
             if is_training:
                 #TODO: change this back to normal
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = self.params['out_layer_dropout_keep_prob']
-                fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'], self.ops['train_step'],
-                              self.ops['labels'], self.ops['computed_values'],
-                              self.ops['final_node_representations'],
-                              self.placeholders['node_mask'], self.ops['losses'],
-                              self.ops['masked_loss'], self.ops['new_mask'],
-                              self.placeholders['initial_node_representation'],
-                              self.weights['edge_weights'], self.weights['edge_biases'],
-                              self.weights['regression_transform_task%i' % 0].params['weights'],
-                              self.placeholders['num_vertices']
-                              ]
+                fetch_list.append(self.ops['train_step'])
 
             else:
                 # it is not trainining because we are not requesting the self.ops['train_step'] parametr
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
-                fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
-                              self.weights['edge_weights'], self.weights['edge_biases'],
-                              self.ops['final_node_representations'],
-                              self.weights['regression_transform_task%i' % 0].params['weights'],
-                              self.ops['labels'], self.ops['computed_values'],
-                              self.placeholders['node_mask'], self.placeholders['num_vertices']]
 
             result = self.sess.run(fetch_list, feed_dict=batch_data)
             #TODO: delete
 
-            labels = result[4] if is_training else result[7]
-            computed_values = result[5] if is_training else result[8]
-            final_node_representations = result[6] if is_training else result[5]
-            node_mask = result[7] if is_training else result[9]
-            # masked_labels = result[9]
-            # inv_mask = result[10]
-            # last_h = result[11]
-            # gate_input = result[12]
-            # initial_node_representation = result[11]
-            edge_weights = result[12] if is_training else result[3]
-            edge_biases = result[13]if is_training else result[4]
-            regression_transform_task = result[14]if is_training else result[6]
-            num_vertices = result[15] if is_training else result[10]
+            labels = result[3]
+            computed_values = result[4]
+            final_node_representations = result[5]
+            node_mask = result[6]
+            initial_node_representation = result[10]
+            edge_weights = result[11]
+            edge_biases = result[12]
+            regression_transform_task = result[13]
+            num_vertices = result[14]
+            acts = result[15]
+            mm = result[16]
+            adjacency_matrix = result[17]
+            edge_weights_ops = result[18]
+            hh = result[19]
+            h_gru = result[20]
+            edge_weight_dkp = result[21]
+            m1 = result[22]
             loss = result[0]
 
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))

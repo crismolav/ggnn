@@ -169,17 +169,18 @@ class DenseGGNNChemModel(ChemModel):
             for i in range(self.params['num_timesteps']):
                 if i > 0:
                     tf.get_variable_scope().reuse_variables()
-                for edge_type in range(self.num_edge_types):
+                #TODO: go back to normal
+                for edge_type in range(1):
+                # for edge_type in range(self.num_edge_types):
                     #'edge_weights' : [e, h, h]
                     m = tf.matmul(h, tf.nn.dropout(
                         self.weights['edge_weights'][edge_type],
                         keep_prob=self.placeholders['edge_weight_dropout_keep_prob'])) # ID: (b*e*v) else : [b*v, h]
+                    self.ops['m1'] = tf.identity(m)
 
-                    self.ops['del1'] = self.weights['edge_weights'][edge_type]
                     if self.args['--pr'] == 'identity':
                         m = tf.reshape(m, [-1, e, v, h_dim])
                         m = tf.transpose(m, [1, 0, 2, 3]) # ID (e, b, v, h)
-
                     else:
                         m = tf.reshape(m, [-1, v, h_dim]) # [b, v, h]
                     if self.params['use_edge_bias']:
@@ -191,8 +192,13 @@ class DenseGGNNChemModel(ChemModel):
                         acts += tf.matmul(self.__adjacency_matrix[edge_type], m)# (b, v, h)
 
                 acts = tf.reshape(acts, [-1, h_dim])  # ID (e * b * v, h)  (b * v, h)                                                       # [b*v, h]
-
-                h = self.weights['node_gru'](acts, h)[1] # ID (e * b * v, h)  (b * v, h)                                            # [b*v, h]
+                #TODO: delete
+                self.ops['acts'] = tf.identity(acts)
+                self.ops['m'] = tf.identity(m)
+                self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
+                self.ops['h'] = tf.identity(h)
+                h = self.weights['node_gru'](acts, h)[1] # ID (e * b * v, h)  (b * v, h)                                         # [b*v, h]
+                self.ops['h_gru'] = tf.identity(h)
             if self.args['--pr'] == 'identity':
                 last_h = tf.reshape(h, [e, -1, v, h_dim])
                 last_h = tf.transpose(last_h, [1, 0, 2, 3])
