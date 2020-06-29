@@ -53,7 +53,7 @@ class ChemModel(object):
             'batch_size': 10,
             'num_epochs': 400,
             'patience': 25,
-            'learning_rate': 0.001,
+            'learning_rate': 0.002,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
