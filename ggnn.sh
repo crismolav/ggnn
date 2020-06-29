@@ -1,4 +1,4 @@
-#!/bin/basha
+#!/bin/bash
 #SBATCH -J task1
 #SBATCH -p high
 #SBATCH --workdir=/homedtic/cmorales
@@ -11,4 +11,4 @@
 export PATH="$HOME/project/anaconda3/bin:$PATH"
 source activate goog3
 cd /homedtic/cmorales/cmol/ggnn
-python chem_tensorflow_dense.py --pr identity --restrict_data 10 --log_dir borrar --test_with_train
+python chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar --test_with_train
