@@ -170,8 +170,8 @@ class DenseGGNNChemModel(ChemModel):
                 if i > 0:
                     tf.get_variable_scope().reuse_variables()
                 #TODO: go back to normal
-                for edge_type in range(1):
-                # for edge_type in range(self.num_edge_types):
+                # for edge_type in range(1):
+                for edge_type in range(self.num_edge_types):
                     #'edge_weights' : [e, h, h]
                     m = tf.matmul(h, tf.nn.dropout(
                         self.weights['edge_weights'][edge_type],

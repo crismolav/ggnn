@@ -449,10 +449,10 @@ class ChemModel(object):
         acc_las = acc_las / processed_graphs
         acc_uas = acc_uas / processed_graphs
 
-        if acc_las > 0.96:
-            self.print_all_results_as_graph(
-                all_labels=all_labels, all_computed_values=all_computed_values,
-                all_num_vertices=all_num_vertices, all_masks=all_masks)
+        # if acc_las > 0.96:
+        #     self.print_all_results_as_graph(
+        #         all_labels=all_labels, all_computed_values=all_computed_values,
+        #         all_num_vertices=all_num_vertices, all_masks=all_masks)
 
         return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas
 
