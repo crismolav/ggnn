@@ -50,10 +50,10 @@ class ChemModel(object):
     def get_id_params(self):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
-            'batch_size': 10,
+            'batch_size': 20,
             'num_epochs': 400,
             'patience': 25,
-            'learning_rate': 0.002,
+            'learning_rate': 0.003,
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
