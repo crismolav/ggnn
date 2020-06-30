@@ -826,7 +826,7 @@ class DenseGGNNChemModel(ChemModel):
 
 def main():
     args = docopt(__doc__)
-
+    start_time = time.time()
     # try:
     if args['--evaluate']:
         if args['--restore'] is None:
@@ -846,6 +846,9 @@ def main():
         model = DenseGGNNChemModel(args)
         print("training")
         model.train()
+    end_time = time.time()
+    total_time = end_time - start_time
+    print("total time %.2f/s"%total_time)
     # except:
     #     typ, value, tb = sys.exc_info()
     #     traceback.print_exc()
