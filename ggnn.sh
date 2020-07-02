@@ -17,6 +17,6 @@ cd /homedtic/cmorales
 source tf1/bin/activate
 ml load TensorFlow/1.14.0-foss-2017a-Python-3.6.4
 ml load TensorFlow-gpu/1.14.0-foss-2017a-Python-3.6.4-CUDA-10.0.130
-ml load CUDA/10.1.105
+module load CUDA/8.0.61
 cd cmol/ggnn
 python chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar $2
