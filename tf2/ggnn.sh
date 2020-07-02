@@ -10,5 +10,5 @@
 
 export PATH="$HOME/project/anaconda3/bin:$PATH"
 source activate goog3
-cd /homedtic/cmorales/cmol/ggnn/tf2
-python chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar $2
+cd /homedtic/cmorales/cmol/ggnn
+python /tf2/chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar $2
