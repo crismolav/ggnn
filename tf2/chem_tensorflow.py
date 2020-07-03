@@ -53,7 +53,7 @@ class ChemModel(object):
             'batch_size': 20,
             'num_epochs': 400,
             'patience': 25,
-            'learning_rate': 0.003 if not self.args.get('--alpha') else float(self.args.get('--alpha')),
+            'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
