@@ -19,6 +19,7 @@ Options:
     --skip_data K            skips first K number of data samples.
     --pr NAME                type of problem file to retrieve
     --test_with_train        test with training data
+    --alpha K                learning rate
 """
 from __future__ import print_function
 from typing import Sequence, Any

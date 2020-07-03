@@ -53,7 +53,7 @@ class ChemModel(object):
             'batch_size': 20,
             'num_epochs': 400,
             'patience': 25,
-            'learning_rate': 0.003,
+            'learning_rate': 0.003 if not self.args.get('--alpha') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
@@ -425,6 +425,7 @@ class ChemModel(object):
             writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
+            # set_trace()
             las, uas = self.get_batch_attachment_scores(
                 targets=labels, computed_values= computed_values,
                 mask=node_mask, num_vertices=num_vertices)
