@@ -9,6 +9,6 @@
 #SBATCH --mem=5G
 
 export PATH="$HOME/project/anaconda3/bin:$PATH"
-source activate goog3
+source activate tfgpu
 cd /homedtic/cmorales/cmol/ggnn
-python /tf2/chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar $2
+python tf2/chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar $2
