@@ -6,7 +6,7 @@
 #SBATCH -e /homedtic/cmorales/log/%N.%J.task1.err # STDOUT
 # Number of GPUs per node
 #SBATCH --gres=gpu:1
-#SBATCH --mem=5G
+#SBATCH --mem=50G
 
 export PATH="$HOME/project/anaconda3/bin:$PATH"
 source activate tfgpu
