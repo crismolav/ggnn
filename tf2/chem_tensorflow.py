@@ -50,7 +50,7 @@ class ChemModel(object):
     def get_id_params(self):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
-            'batch_size': 20,
+            'batch_size': 30,
             'num_epochs': 400,
             'patience': 25,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
