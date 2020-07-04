@@ -460,6 +460,10 @@ class ChemModel(object):
     def train(self):
         log_to_save = []
         total_time_start = time.time()
+        avg_train_batch_size = self.get_average_batch_size(data=self.train_data)
+        print("Average train batch size: %.2f\n" % avg_train_batch_size)
+        avg_val_batch_size   = self.get_average_batch_size(data=self.valid_data)
+        print("Average val batch size: %.2f\n" % avg_val_batch_size)
         with self.graph.as_default():
             if self.args.get('--restore') is not None:
                 _, valid_accs, _, _, steps, valid_las, valid_uas = \

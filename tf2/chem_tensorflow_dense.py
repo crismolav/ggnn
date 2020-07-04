@@ -402,6 +402,22 @@ class DenseGGNNChemModel(ChemModel):
 
         return batch_data
 
+    def get_average_batch_size(self, data):
+        (bucketed, bucket_sizes, bucket_at_step) = data
+        bucket_counters = defaultdict(int)
+        avg_num = 0
+        for step in range(len(bucket_at_step)):
+            bucket = bucket_at_step[step]
+            start_idx = bucket_counters[bucket] * self.params['batch_size']
+            end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
+            elements = bucketed[bucket][start_idx:end_idx]
+            batch_data = self.make_batch(elements)
+
+            num_graphs = len(batch_data['init'])
+            avg_num += num_graphs
+
+        avg_num = avg_num / len(bucket_at_step)
+        return avg_num
 
     def make_minibatch_iterator(self, data, is_training: bool):
         (bucketed, bucket_sizes, bucket_at_step) = data
@@ -412,7 +428,7 @@ class DenseGGNNChemModel(ChemModel):
 
         bucket_counters = defaultdict(int)
         dropout_keep_prob = self.params['graph_state_dropout_keep_prob'] if is_training else 1.
-
+        avg_num = 0
         for step in range(len(bucket_at_step)):
             bucket = bucket_at_step[step]
             start_idx = bucket_counters[bucket] * self.params['batch_size']
@@ -441,6 +457,7 @@ class DenseGGNNChemModel(ChemModel):
             }
             bucket_counters[bucket] += 1
             iteration = step
+            avg_num += num_graphs
 
             yield batch_feed_dict
 
