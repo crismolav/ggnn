@@ -848,6 +848,8 @@ def main():
     # try:
     device_name = tf.test.gpu_device_name()
     print("device_name : %s" % device_name)
+    strategy = tf.distribute.MirroredStrategy()
+    print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
 
     if args['--evaluate']:
         if args['--restore'] is None:
