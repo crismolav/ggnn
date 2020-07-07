@@ -6,7 +6,7 @@
 #SBATCH -e /homedtic/cmorales/log/%N.%J.task1.err # STDOUT
 # Number of GPUs per node
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --mem=20G
 
 export PATH="$HOME/project/anaconda3/bin:$PATH"

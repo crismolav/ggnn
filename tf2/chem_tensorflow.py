@@ -425,7 +425,11 @@ class ChemModel(object):
             writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
-            # set_trace()
+
+            #TODO: delete these prints
+            print("computed_values : %s"%computed_values[0])
+            is_training_str = "Yes" if is_training else "No"
+            print("Is training : %s" % is_training_str)
             las, uas = self.get_batch_attachment_scores(
                 targets=labels, computed_values= computed_values,
                 mask=node_mask, num_vertices=num_vertices)
