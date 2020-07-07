@@ -425,16 +425,15 @@ class ChemModel(object):
             writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
+            try:
+                las, uas = self.get_batch_attachment_scores(
+                    targets=labels, computed_values= computed_values,
+                    mask=node_mask, num_vertices=num_vertices)
+                acc_las += las * num_graphs
+                acc_uas += uas * num_graphs
+            except:
+                raise Exception('Apparent division by zero, comp_values: %s'%computed_values[0])
 
-            #TODO: delete these prints
-            print("computed_values : %s"%computed_values[0])
-            is_training_str = "Yes" if is_training else "No"
-            print("Is training : %s" % is_training_str)
-            las, uas = self.get_batch_attachment_scores(
-                targets=labels, computed_values= computed_values,
-                mask=node_mask, num_vertices=num_vertices)
-            acc_las += las * num_graphs
-            acc_uas += uas * num_graphs
             print("Running %s, batch %i (has %i graphs). Loss so far: %.4f" % (epoch_name,
                                                                                step,
                                                                                num_graphs,
