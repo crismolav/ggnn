@@ -63,10 +63,8 @@ def target_to_adj_mat(target, max_n_vertices, num_edge_types, output_size, tie_f
     #amat = np.zeros((num_edge_types, max_n_vertices, max_n_vertices))
 
     for i, (src, e) in enumerate(target):
-        try:
-            amat[e-1, i+1, src] = 1
-        except:
-            set_trace()
+        amat[e-1, i+1, src] = 1
+
         # amat[e-1 + bwd_edge_offset, src] = 1
     return amat
 
@@ -394,11 +392,9 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['labels'].append(target_task_values)
             batch_data['task_masks'].append(target_task_mask)
         if self.args['--pr'] == 'identity':
-            try:
-                batch_data['node_mask'] = np.reshape(batch_data['node_mask'], [len(elements), -1])
-                batch_data['softmax_mask'] = np.reshape(batch_data['softmax_mask'], [len(elements), -1])
-            except:
-                set_trace()
+            batch_data['node_mask'] = np.reshape(batch_data['node_mask'], [len(elements), -1])
+            batch_data['softmax_mask'] = np.reshape(batch_data['softmax_mask'], [len(elements), -1])
+
 
         return batch_data
 
@@ -598,6 +594,7 @@ class DenseGGNNChemModel(ChemModel):
         acc_las = 0
         acc_uas = 0
         b = targets.shape[0]
+
         for i, result in enumerate(results_reshaped):
             target = targets_reshaped[i]
             target_graph = adj_mat_to_target(adj_mat=target)
@@ -804,8 +801,6 @@ class DenseGGNNChemModel(ChemModel):
             start_idx = bucket_counters[bucket] * self.params['batch_size']
             end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
             elements = bucketed[bucket][start_idx:end_idx]
-            if elements == []:
-                set_trace()
             batch_data = self.make_batch(elements)
 
             num_graphs = len(batch_data['init'])
