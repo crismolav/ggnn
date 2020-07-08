@@ -12,4 +12,4 @@
 export PATH="$HOME/project/anaconda3/bin:$PATH"
 source activate tfgpu
 cd /homedtic/cmorales/cmol/ggnn
-python tf2/chem_tensorflow_dense.py --pr identity --restrict_data $1 --log_dir borrar $2 $3 $4
+python tf2/chem_tensorflow_dense.py --pr identity --log_dir borrar $1 $2 $3 $4
