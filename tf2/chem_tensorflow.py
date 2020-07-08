@@ -511,7 +511,7 @@ class ChemModel(object):
                 with open(self.log_file, 'w') as f:
                     json.dump(log_to_save, f, indent=4)
 
-                val_acc = train_loss
+                val_acc = 1-train_las
                 #TODO: reconsider this change, we are now using loss as accuracy
                 # val_acc = np.sum(valid_accs)  # type: float
                 # val_acc = 1-valid_las
