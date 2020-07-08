@@ -432,6 +432,7 @@ class ChemModel(object):
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
             except:
+                print("here")
                 raise Exception('Apparent division by zero, comp_values: %s'%computed_values[0])
 
             print("Running %s, batch %i (has %i graphs). Loss so far: %.4f" % (epoch_name,
