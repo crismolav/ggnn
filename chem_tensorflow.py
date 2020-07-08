@@ -506,9 +506,10 @@ class ChemModel(object):
                 with open(self.log_file, 'w') as f:
                     json.dump(log_to_save, f, indent=4)
 
+                val_acc = train_loss
                 #TODO: reconsider this change, we are now using loss as accuracy
                 # val_acc = np.sum(valid_accs)  # type: float
-                val_acc = 1-valid_las
+                # val_acc = 1-valid_las
                 # if val_acc < best_val_acc:
                 if val_acc < best_val_acc:
                     self.save_progress(self.best_model_file, self.train_step_id, self.valid_step_id)
