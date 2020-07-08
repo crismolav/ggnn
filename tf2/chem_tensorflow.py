@@ -324,7 +324,7 @@ class ChemModel(object):
                 else:
                     print("Freezing weights of variable %s." % var.name)
             trainable_vars = filtered_vars
-        optimizer = tf.compat.v1.train.AdamOptimizer(self.params['learning_rate'],beta1=0.9, beta2=0.999)
+        optimizer = tf.keras.optimizers.Adam(self.params['learning_rate'])
 
         grads_and_vars = optimizer.compute_gradients(self.ops['loss'], var_list=trainable_vars)
         clipped_grads = []
