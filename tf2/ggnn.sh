@@ -7,7 +7,7 @@
 # Number of GPUs per node
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=20G
+#SBATCH --mem=10G
 
 export PATH="$HOME/project/anaconda3/bin:$PATH"
 source activate tfgpu
