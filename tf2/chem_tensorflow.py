@@ -32,6 +32,10 @@ def get_train_and_validation_files(args):
             train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_id.json'
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
+    elif args.get('--pr') == 'btb':
+        train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json'
+        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json' if not args.get('--test_with_train') else train_file
+
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
         valid_file = 'molecules_valid.json' if not args.get('--test_with_train') else train_file
@@ -69,7 +73,7 @@ class ChemModel(object):
             'train_file': train_file,
             'valid_file': valid_file,
             'restrict': self.args.get("--restrict_data"),
-            'output_size': 1 if self.args['--pr'] != 'identity' else 150
+            'output_size': 1 if self.args['--pr'] not in ['identity', 'btb'] else 150
         }
 
     def get_id_sample_params(self):
@@ -93,7 +97,7 @@ class ChemModel(object):
 
             'train_file': train_file,
             'valid_file': valid_file,
-            'output_size': 1 if self.args['--pr'] != 'identity' else 6
+            'output_size': 1 if self.args['--pr'] not in ['identity', 'btb'] else 6
         }
 
     def __init__(self, args):
@@ -137,6 +141,7 @@ class ChemModel(object):
             bank_type='std')
         self.dep_list_out = sample_dep_list if self.args.get('--sample') else get_dep_list(
             bank_type='nivre')
+
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
 
@@ -216,7 +221,7 @@ class ChemModel(object):
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(tf.float32,
                                                               [len(self.params['task_ids']), None],
                                                               name='target_mask')
-        elif self.args['--pr'] == 'identity':
+        elif self.args['--pr'] in ['identity', 'btb']:
             self.placeholders['target_values'] = tf.compat.v1.placeholder(
                 tf.float32, [None, None, self.num_edge_types, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
@@ -257,7 +262,7 @@ class ChemModel(object):
                 if self.args['--pr'] == 'molecule':
                     labels = self.placeholders['target_values'][internal_id, :]
                     mask = tf.transpose(a=self.placeholders['node_mask'])
-                elif self.args['--pr'] == 'identity':
+                elif self.args['--pr'] in ['identity', 'btb']:
                     labels = self.placeholders['target_values']  # (o,v,e,b)
                     labels = tf.transpose(a=labels, perm=[2, 1, 0, 3])  # (e,v,o,b)
                     labels = tf.reshape(labels, [-1, self.placeholders['num_graphs']]) # (e * v * o,b)
