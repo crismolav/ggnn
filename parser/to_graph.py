@@ -14,7 +14,8 @@ POS_list = [
 
 sample_dep_list = ['ROOT', 'det', 'nsubj', 'aux']
 
-def process_sentence(sentence_list, dep_list, problem='root'):
+def process_sentence(sentence_list, dep_list, problem='root',
+                     sentence_list_out=None, dep_list_out=None):
     graph = []
     target_list = []
     sentence_dict = {}
@@ -23,7 +24,7 @@ def process_sentence(sentence_list, dep_list, problem='root'):
     selected_id = get_random_node(sentence_list)
     last_node = sentence_list[-1]
 
-    for line in sentence_list:
+    for i, line in enumerate(sentence_list):
         line_as_list = line.split('\t')
         id = line_as_list[0]
         label = line_as_list[1]
@@ -44,6 +45,14 @@ def process_sentence(sentence_list, dep_list, problem='root'):
             target_list.append(get_node_as_vector(id=target_id, last_node=last_node))
         elif problem in ['identity','id_sample']:
             target_unit = [int(father), int(edge_type)]
+            target_list.append(target_unit)
+        elif problem in ['btb']:
+            line_out = sentence_list_out[i]
+            line_as_list_out = line_out.split('\t')
+            father_out = line_as_list_out[6]
+            dep_out = line_as_list_out[7].strip()
+            edge_type_out = dep_list_out.index(dep_out) + 1
+            target_unit = [int(father_out), int(edge_type_out)]
             target_list.append(target_unit)
 
 
@@ -108,7 +117,7 @@ def get_node_features(problem, selected_id, target_id, sentence_list):
         node_features = [[0, 0]]*(last_id+1)
         node_features[selected_id] = [1, 0]
         node_features[target_id] = [0, 1]
-    elif problem in ['identity', 'id_sample']:
+    elif problem in ['identity', 'id_sample', 'btb']:
         node_features = [[0] for _ in range(0, last_id+1)]
 
     return node_features
@@ -126,8 +135,13 @@ def get_new_file_path(problem, file_name):
         new_file_name = file_name.replace(".conll", "_head.json")
         new_file_path = '%s/%s' % (new_file_folder, new_file_name)
 
+
     elif problem in ['identity', 'id_sample']:
         new_file_name = file_name.replace(".conll", "_id.json")
+        new_file_path = '%s/%s' % (new_file_folder, new_file_name)
+
+    elif problem in ['btb']:
+        new_file_name = file_name.replace(".conll", "_btb.json")
         new_file_path = '%s/%s' % (new_file_folder, new_file_name)
 
 
@@ -155,46 +169,90 @@ def get_dep_list(bank_type):
                 if line.strip() == '':
                     continue
                 line_as_list = line.split('\t')
-                dep = line_as_list[7]
+                dep = line_as_list[7].strip()
                 dep_set.add(dep)
     return list(dep_set)
 def main():
     problem = sys.argv[1]
-    file_name = sys.argv[2]
-    experiment = True if len(sys.argv) >=4 and sys.argv[3] == '1' else False
+    if problem == 'btb':
+        file_name_in = sys.argv[2]
+        file_name_out = sys.argv[3]
+        file_path_in = get_file_path(file_name=file_name_in)
+        file_path_out = get_file_path(file_name=file_name_out)
 
-    # file_name = 'en-wsj-std-dev-stanford-3.3.0-tagged.conll'
-    file_path = get_file_path(file_name=file_name)
+        new_file_path = get_new_file_path(problem=problem, file_name=file_name_in)
 
-    new_file_path = get_new_file_path(problem=problem, file_name=file_name)
+        count = 0
 
-    count = 0
-    bank_type = 'nivre' if 'nivre' in file_name else 'std'
-    dep_list = get_dep_list(bank_type=bank_type)
+        dep_list_in = get_dep_list(bank_type='std')
+        dep_list_out = get_dep_list(bank_type='nivre')
 
-    with open(file_path, 'r') as input_file:
-        with open(new_file_path, 'w') as output_file:
-            lines = input_file.readlines()
-            new_sentence_list = []
-            output_file.write('[')
-            for i, line in enumerate(lines):
-                if line.strip() == '':
-                    sentence_dict = process_sentence(
-                        sentence_list=new_sentence_list, problem=problem, dep_list=dep_list)
+        with open(file_path_in, 'r') as input_file_in:
+            with open(file_path_out, 'r') as input_file_out:
+                with open(new_file_path, 'w') as output_file:
+                    lines_in = input_file_in.readlines()
+                    lines_out = input_file_out.readlines()
+                    new_sentence_list_in = []
+                    new_sentence_list_out = []
+                    output_file.write('[')
+                    for i, line_in in enumerate(lines_in):
+                        line_out = lines_out[i]
+                        if line_in.strip() == '':
+                            sentence_dict = process_sentence(
+                                sentence_list=new_sentence_list_in, problem=problem,
+                                dep_list=dep_list_in, sentence_list_out=new_sentence_list_out,
+                                dep_list_out=dep_list_out)
 
-                    output_file.write(json.dumps(sentence_dict))
-                    new_sentence_list = []
-                    count += 1
+                            output_file.write(json.dumps(sentence_dict))
+                            new_sentence_list_in = []
+                            count += 1
 
-                    if i != len(lines) - 1:
-                        output_file.write(', ')
-                    if experiment:
-                        break
-                else:
-                    new_sentence_list.append(line)
+                            if i != len(lines_in) - 1:
+                                output_file.write(', ')
 
-            print("Number of samples in %s: %i" % (file_name, count))
-            output_file.write(']')
+                        else:
+                            new_sentence_list_in.append(line_in)
+                            new_sentence_list_out.append(line_out)
+
+                    print("Number of samples in %s: %i" % (file_path_in, count))
+                    output_file.write(']')
+    else:
+
+        file_name = sys.argv[2]
+        experiment = True if len(sys.argv) >=4 and sys.argv[3] == '1' else False
+
+        # file_name = 'en-wsj-std-dev-stanford-3.3.0-tagged.conll'
+        file_path = get_file_path(file_name=file_name)
+
+        new_file_path = get_new_file_path(problem=problem, file_name=file_name)
+
+        count = 0
+        bank_type = 'nivre' if 'nivre' in file_name else 'std'
+        dep_list = get_dep_list(bank_type=bank_type)
+
+        with open(file_path, 'r') as input_file:
+            with open(new_file_path, 'w') as output_file:
+                lines = input_file.readlines()
+                new_sentence_list = []
+                output_file.write('[')
+                for i, line in enumerate(lines):
+                    if line.strip() == '':
+                        sentence_dict = process_sentence(
+                            sentence_list=new_sentence_list, problem=problem, dep_list=dep_list)
+
+                        output_file.write(json.dumps(sentence_dict))
+                        new_sentence_list = []
+                        count += 1
+
+                        if i != len(lines) - 1:
+                            output_file.write(', ')
+                        if experiment:
+                            break
+                    else:
+                        new_sentence_list.append(line)
+
+                print("Number of samples in %s: %i" % (file_name, count))
+                output_file.write(']')
 
 if __name__ == "__main__":
     main()
