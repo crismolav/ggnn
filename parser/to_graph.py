@@ -12,22 +12,9 @@ POS_list = [
     "RBR", "$", "CD", "VBN", "JJR" ,"RP", "PRP", 'PRP$',
     'PDT', 'RBS', 'WP', 'JJS', 'EX', 'UH', 'FW', '#', 'LS']
 
-dep_list = ['dobj', 'ccomp', 'punct', 'nn', 'cc',
-            'det', 'aux', 'possessive', 'prep',
-            'ROOT', 'rcmod', 'amod', 'nsubj',
-            'xcomp', 'advmod', 'pobj', 'conj',
-            'poss', 'appos', 'dep' , 'pcomp',
-            'nsubjpass', 'neg', 'auxpass', 'mark',
-            'advcl','cop', 'number', 'num',
-            'partmod', 'quantmod' ,'infmod',
-            'prt', 'parataxis', 'tmod', 'npadvmod',
-            'csubj', 'acomp', 'discourse', 'mwe',
-            'iobj', 'preconj', 'expl', 'predet',
-            'csubjpass']
-
 sample_dep_list = ['ROOT', 'det', 'nsubj', 'aux']
 
-def process_sentence(sentence_list, problem='root'):
+def process_sentence(sentence_list, dep_list, problem='root'):
     graph = []
     target_list = []
     sentence_dict = {}
@@ -153,7 +140,24 @@ def get_file_path(file_name):
     file_path = '%s/%s' % (path, file_name)
     return file_path
 
-
+def get_dep_list(bank_type):
+    if bank_type == 'nivre':
+        file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll']
+    else:
+        file_names = ['en-wsj-std-dev-stanford-3.3.0-tagged.conll',
+                      'en-wsj-std-test-stanford-3.3.0-tagged.conll']
+    dep_set = set()
+    for file_name in file_names:
+        file_path = get_file_path(file_name=file_name)
+        with open(file_path, 'r') as input_file:
+            lines = input_file.readlines()
+            for i, line in enumerate(lines):
+                if line.strip() == '':
+                    continue
+                line_as_list = line.split('\t')
+                dep = line_as_list[7]
+                dep_set.add(dep)
+    return list(dep_set)
 def main():
     problem = sys.argv[1]
     file_name = sys.argv[2]
@@ -165,6 +169,9 @@ def main():
     new_file_path = get_new_file_path(problem=problem, file_name=file_name)
 
     count = 0
+    bank_type = 'nivre' if 'nivre' in file_name else 'std'
+    dep_list = get_dep_list(bank_type=bank_type)
+
     with open(file_path, 'r') as input_file:
         with open(new_file_path, 'w') as output_file:
             lines = input_file.readlines()
@@ -173,7 +180,7 @@ def main():
             for i, line in enumerate(lines):
                 if line.strip() == '':
                     sentence_dict = process_sentence(
-                        sentence_list=new_sentence_list, problem=problem)
+                        sentence_list=new_sentence_list, problem=problem, dep_list=dep_list)
 
                     output_file.write(json.dumps(sentence_dict))
                     new_sentence_list = []
@@ -191,3 +198,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    #python to_graph.py id en-wsj-std-dev-stanford-3.3.0-tagged.conll

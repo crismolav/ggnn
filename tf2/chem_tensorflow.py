@@ -12,7 +12,7 @@ from pdb import set_trace
 from utils import MLP, ThreadedIterator, SMALL_NUMBER
 import sys
 sys.path.insert(1, './parser')
-from to_graph import dep_list, sample_dep_list
+from to_graph import get_dep_list, sample_dep_list
 
 dep_tree = True
 
@@ -133,7 +133,10 @@ class ChemModel(object):
         self.max_num_vertices = 0
         self.num_edge_types = 0
         self.annotation_size = 0
-        self.dep_list = sample_dep_list if self.args.get('--sample') else dep_list
+        self.dep_list = sample_dep_list if self.args.get('--sample') else get_dep_list(
+            bank_type='std')
+        self.dep_list_out = sample_dep_list if self.args.get('--sample') else get_dep_list(
+            bank_type='nivre')
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
 
