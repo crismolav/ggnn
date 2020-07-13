@@ -20,6 +20,7 @@ Options:
     --pr NAME                type of problem file to retrieve
     --test_with_train        test with training data
     --alpha K                learning rate
+    --new                    new way of calculating
 """
 from __future__ import print_function
 from typing import Sequence, Any
@@ -168,34 +169,10 @@ class DenseGGNNChemModel(ChemModel):
             for i in range(self.params['num_timesteps']):
                 if i > 0:
                     tf.compat.v1.get_variable_scope().reuse_variables()
-                #TODO: go back to normal
-                # for edge_type in range(1):
-                for edge_type in range(self.num_edge_types):
-                    #'edge_weights' : [e, h, h]
-                    m = tf.matmul(h, tf.nn.dropout(
-                        self.weights['edge_weights'][edge_type],
-                        rate=1 - (self.placeholders['edge_weight_dropout_keep_prob']))) # ID: (b*e*v) else : [b*v, h]
-                    self.ops['m1'] = tf.identity(m)
-
-                    if self.args['--pr'] in ['identity', 'btb']:
-                        m = tf.reshape(m, [-1, e, v, h_dim])
-                        m = tf.transpose(a=m, perm=[1, 0, 2, 3]) # ID (e, b, v, h)
-                    else:
-                        m = tf.reshape(m, [-1, v, h_dim]) # [b, v, h]
-                    if self.params['use_edge_bias']:
-                        m += self.weights['edge_biases'][edge_type]                                         # [b, v, h]
-                    if edge_type == 0:
-                        # __adjacency_matrix[edge_type] (b, v, v)
-                        acts = tf.matmul(self.__adjacency_matrix[edge_type], m) # ID (e, b, v, h)   (b, v, h)
-                    else:
-                        acts += tf.matmul(self.__adjacency_matrix[edge_type], m)# (b, v, h)
-
-                acts = tf.reshape(acts, [-1, h_dim])  # ID (e * b * v, h)  (b * v, h)                                                       # [b*v, h]
-                #TODO: delete
-                self.ops['acts'] = tf.identity(acts)
-                self.ops['m'] = tf.identity(m)
-                self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
-                self.ops['h'] = tf.identity(h)
+                if self.args['--pr'] in ['identity', 'btb'] and self.args.get('--new'):
+                    acts = self.compute_timestep_btb(h, e, v, h_dim)
+                else:
+                    acts = self.compute_timestep_normal(h, e, v, h_dim)
                 h = self.weights['node_gru'](acts, h)[1] # ID (e * b * v, h)  (b * v, h)                                         # [b*v, h]
                 self.ops['h_gru'] = tf.identity(h)
             if self.args['--pr'] in ['identity', 'btb']:
@@ -205,6 +182,65 @@ class DenseGGNNChemModel(ChemModel):
                 last_h = tf.reshape(h, [-1, v, h_dim]) # (b, v, h)
         return last_h
 
+    def compute_timestep_normal(self, h, e, v, h_dim):
+        for edge_type in range(self.num_edge_types):
+            # 'edge_weights' : [e, h, h]
+            m = tf.matmul(h, tf.nn.dropout(
+                self.weights['edge_weights'][edge_type],
+                rate=1 - (self.placeholders[
+                    'edge_weight_dropout_keep_prob'])))  # ID: (b * e * v, h) else : [b*v, h]
+            self.ops['m1'] = tf.identity(m)
+
+            if self.args['--pr'] in ['identity', 'btb']:
+                m = tf.reshape(m, [-1, e, v, h_dim])
+                m = tf.transpose(a=m, perm=[1, 0, 2, 3])  # ID (e, b, v, h)
+            else:
+                m = tf.reshape(m, [-1, v, h_dim])  # [b, v, h]
+            if self.params['use_edge_bias']:
+                m += self.weights['edge_biases'][edge_type]  # [b, v, h]
+            if edge_type == 0:
+                # __adjacency_matrix[edge_type] (b, v, v)
+                acts = tf.matmul(self.__adjacency_matrix[edge_type],
+                                 m)  # ID (e, b, v, h)   (b, v, h)
+            else:
+                acts += tf.matmul(self.__adjacency_matrix[edge_type], m)  # (b, v, h)
+
+        acts = tf.reshape(acts, [-1, h_dim])  # ID (e * b * v, h)  (b * v, h)
+        self.ops['acts'] = tf.identity(acts)
+        self.ops['m'] = tf.identity(m)
+        self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
+        self.ops['h'] = tf.identity(h)
+        return acts
+
+    def compute_timestep_btb(self, h, e, v, h_dim):
+        # 'edge_weights' : [e, h, h]
+        if self.args['--pr'] in ['identity', 'btb']:
+            h = tf.reshape(h, [-1, e, v, h_dim])
+        m = tf.matmul(h, tf.nn.dropout(
+            self.weights['edge_weights'],
+            rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))  # ID: (b * e * v, h) else : [b*v, h]
+        self.ops['m1'] = tf.identity(m)
+
+        if self.args['--pr'] in ['identity', 'btb']:
+            m = tf.transpose(a=m, perm=[1, 0, 2, 3])  # ID (e, b, v, h)
+            # __adjacency_matrix (b, v, v, e)
+            # self.__adjacency_matrix = tf.transpose(a=self.__adjacency_matrix, perm=[3, 0, 1, 2])  #ID: (e, b, v, v)
+        else:
+            m = tf.reshape(m, [-1, v, h_dim])  # [b, v, h]
+
+        #TODO: check this
+        # if self.params['use_edge_bias']:
+        #     edge_biases : [e, 1, h]
+        #     m += self.weights['edge_biases'][edge_type]  # [b, v, h]
+
+        acts = tf.matmul(self.__adjacency_matrix, m)  # ID (e, b, v, h)   (b, v, h)
+
+        acts = tf.reshape(acts, [-1, h_dim])  # ID (e * b * v, h)  (b * v, h)
+        self.ops['acts'] = tf.identity(acts)
+        self.ops['m'] = tf.identity(m)
+        self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
+        self.ops['h'] = tf.identity(h)
+        return acts
 
     def gated_regression(self, last_h, regression_gate, regression_transform):
         # last_h: [b x v x h]
@@ -229,7 +265,6 @@ class DenseGGNNChemModel(ChemModel):
             #TODO redo mask
             # gated_outputs = gated_outputs + softmax_mask       # ( b, e * v * o)
 
-            #TODO: trial check later if delete
             #tranform it for calculating softmax correctly
             gated_outputs = tf.reshape(gated_outputs, [-1, e, v, output_n])  # ( b, e, v, o)
             gated_outputs = tf.transpose(a=gated_outputs, perm=[0, 2, 1, 3])  # ( b, v, e, o)
