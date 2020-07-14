@@ -441,7 +441,8 @@ class ChemModel(object):
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
             except:
-                print("here")
+                print('edge weights: %s'%edge_weights)
+                print('edge bias: %s'%edge_biases)
                 raise Exception('Apparent division by zero, comp_values: %s'%computed_values[0])
 
             print("Running %s, batch %i (has %i graphs). Loss so far: %.4f" % (epoch_name,
