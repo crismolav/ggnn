@@ -197,6 +197,7 @@ class DenseGGNNChemModel(ChemModel):
             else:
                 m = tf.reshape(m, [-1, v, h_dim])  # [b, v, h]
             if self.params['use_edge_bias']:
+                # edge_biases [e, 1, h]
                 m += self.weights['edge_biases'][edge_type]  # [b, v, h]
             if edge_type == 0:
                 # __adjacency_matrix[edge_type] (b, v, v)
@@ -215,23 +216,27 @@ class DenseGGNNChemModel(ChemModel):
     def compute_timestep_btb(self, h, e, v, h_dim):
         # 'edge_weights' : [e, h, h]
         if self.args['--pr'] in ['identity', 'btb']:
-            h = tf.reshape(h, [-1, e, v, h_dim])
+            h = tf.reshape(h, [-1, e, v, h_dim]) # ID: (b, e, v, h)
         m = tf.matmul(h, tf.nn.dropout(
             self.weights['edge_weights'],
-            rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))  # ID: (b * e * v, h) else : [b*v, h]
+            rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))  # ID: (b, e, v, h)
         self.ops['m1'] = tf.identity(m)
 
         if self.args['--pr'] in ['identity', 'btb']:
-            m = tf.transpose(a=m, perm=[1, 0, 2, 3])  # ID (e, b, v, h)
-            # __adjacency_matrix (b, v, v, e)
-            # self.__adjacency_matrix = tf.transpose(a=self.__adjacency_matrix, perm=[3, 0, 1, 2])  #ID: (e, b, v, v)
+            m = tf.transpose(a=m, perm=[0, 2, 1, 3])  # ID (b, v, e, h)
+            # m = tf.transpose(a=m, perm=[1, 0, 2, 3])  # ID (e, b, v, h)
+            # __adjacency_matrix (e, b, v, v)
+
         else:
             m = tf.reshape(m, [-1, v, h_dim])  # [b, v, h]
 
-        #TODO: check this
-        # if self.params['use_edge_bias']:
-        #     edge_biases : [e, 1, h]
-        #     m += self.weights['edge_biases'][edge_type]  # [b, v, h]
+        # #TODO: check this
+        if self.params['use_edge_bias']:
+            #edge_biases : [e, 1, h]
+            __edge_biases = tf.transpose(a=self.weights['edge_biases'], perm=[1, 0, 2]) # [1, e, h]
+            m += __edge_biases
+
+        m = tf.transpose(a=m, perm=[2, 0, 1, 3]) # ID (e, b, v, h)
 
         acts = tf.matmul(self.__adjacency_matrix, m)  # ID (e, b, v, h)   (b, v, h)
 
@@ -240,6 +245,7 @@ class DenseGGNNChemModel(ChemModel):
         self.ops['m'] = tf.identity(m)
         self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
         self.ops['h'] = tf.identity(h)
+        self.ops['_am'] = tf.identity(self.__adjacency_matrix)
         return acts
 
     def gated_regression(self, last_h, regression_gate, regression_transform):

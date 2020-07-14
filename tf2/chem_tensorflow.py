@@ -396,6 +396,7 @@ class ChemModel(object):
                           self.ops['m'], self.placeholders['adjacency_matrix'],
                           self.ops['edge_weights'], self.ops['h'], self.ops['h_gru'],
                           self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
+                          self.ops['_am']
                           ]
             if is_training:
                 #TODO: change this back to normal
@@ -426,8 +427,9 @@ class ChemModel(object):
             h_gru = result[20]
             edge_weight_dkp = result[21]
             m1 = result[22]
+            _am = result[23]
             loss = result[0]
-
+            
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
