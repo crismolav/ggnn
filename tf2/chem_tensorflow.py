@@ -428,14 +428,15 @@ class ChemModel(object):
             edge_weight_dkp = result[21]
             m1 = result[22]
             _am = result[23]
-            loss = result[0]
-            
+            loss_ = result[0]
+
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
             writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
+
             try:
                 las, uas = self.get_batch_attachment_scores(
                     targets=labels, computed_values= computed_values,
@@ -459,13 +460,14 @@ class ChemModel(object):
             all_num_vertices.append(num_vertices)
             all_masks.append(node_mask)
 
+        # if not is_training:
+        #     set_trace()
         accuracies = np.sum(accuracies, axis=0) / processed_graphs
         loss = loss / processed_graphs
         error_ratios = accuracies / chemical_accuracies[self.params["task_ids"]]
         instance_per_sec = processed_graphs / (time.time() - start_time)
         acc_las = acc_las / processed_graphs
         acc_uas = acc_uas / processed_graphs
-
         # if acc_las > 0.96:
         #     self.print_all_results_as_graph(
         #         all_labels=all_labels, all_computed_values=all_computed_values,
@@ -529,6 +531,7 @@ class ChemModel(object):
                 # val_acc = 1-valid_las
                 # if val_acc < best_val_acc:
                 if val_acc < best_val_acc:
+
                     self.save_progress(self.best_model_file, self.train_step_id, self.valid_step_id)
                     print("  (Best epoch so far, cum. val. acc decreased to %.5f from %.5f. Saving to '%s')" % (
                         val_acc, best_val_acc, self.best_model_file))
