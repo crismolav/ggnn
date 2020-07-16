@@ -253,6 +253,7 @@ class ChemModel(object):
                 with tf.compat.v1.variable_scope("regression"):
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
+
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id]) # ID ( e * v * o,  b)
@@ -289,13 +290,13 @@ class ChemModel(object):
                 if  self.args['--pr'] == 'molecule':
                     self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
                 else:
+                    if self.args.get('--no_labels'):
+                        computed_values, labels, mask = self.reduce_edge_dimension(
+                            computed_values=computed_values, labels=labels, mask=mask)
                     new_mask = tf.cast(mask, tf.bool)
                     masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
                     task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
                     #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
-
-
-
                     # Normalise loss to account for fewer task-specific examples in batch:
                     # task_loss = task_loss * (
                     #             1.0 / (self.params['task_sample_ratios'].get(task_id) or 1.0))
@@ -304,12 +305,34 @@ class ChemModel(object):
                     self.ops['losses'].append(task_loss)
                     self.ops['computed_values'] = computed_values
                     self.ops['labels'] = labels
+                    self.ops['node_mask'] = tf.transpose(mask)
                     self.ops['masked_loss'] = masked_loss
                     self.ops['new_mask'] =  new_mask
 
-
-
         self.ops['loss'] = tf.reduce_sum(input_tensor=self.ops['losses'])
+
+    def reduce_edge_dimension(self, computed_values, labels, mask):
+        # computed_values, labels, mask ( e * v * o,  b)
+        # o, v, e, b = oveb
+        o = self.params['output_size']
+        v = self.placeholders['num_vertices']
+        e = self.num_edge_types
+        b = self.placeholders['num_graphs']
+
+        computed_values = tf.reshape(computed_values, [e, v, o, b])
+        labels = tf.reshape(labels, [e, v, o, b])
+        mask = tf.reshape(mask, [e, v, o, b])
+
+        computed_values = tf.math.reduce_sum(computed_values, axis = 0)
+        labels = tf.math.reduce_sum(labels, axis=0)
+        mask = tf.math.reduce_sum(mask, axis=0)
+
+        computed_values = tf.reshape(computed_values, [v * o, b])
+        labels = tf.reshape(labels, [v * o, b])
+        mask = tf.reshape(mask, [v * o, b])
+
+        return computed_values, labels, mask
+
 
     def calculate_losses_for_molecules(self, computed_values, internal_id, task_id):
         diff = computed_values - self.placeholders['target_values'][internal_id, :]
@@ -387,7 +410,7 @@ class ChemModel(object):
             fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
                           self.ops['labels'], self.ops['computed_values'],
                           self.ops['final_node_representations'],
-                          self.placeholders['node_mask'], self.ops['losses'],
+                          self.ops['node_mask'], self.ops['losses'],
                           self.ops['masked_loss'], self.ops['new_mask'],
                           self.placeholders['initial_node_representation'],
                           self.weights['edge_weights'], self.weights['edge_biases'],
