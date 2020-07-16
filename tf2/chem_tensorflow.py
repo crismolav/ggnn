@@ -55,7 +55,7 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
             'batch_size': 30,
-            'num_epochs': 250,
+            'num_epochs': 350,
             'patience': 25,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
