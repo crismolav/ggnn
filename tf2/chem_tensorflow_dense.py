@@ -665,7 +665,10 @@ class DenseGGNNChemModel(ChemModel):
 
     def print_all_results_as_graph(
             self, all_labels, all_computed_values, all_num_vertices, all_masks):
+        max_i = 8
         for i, computed_values in enumerate(all_computed_values):
+            if i == max_i:
+                break
             labels = all_labels[i]
             num_vertices = all_num_vertices[i]
             mask = all_masks[i]
@@ -677,12 +680,13 @@ class DenseGGNNChemModel(ChemModel):
 
     def print_batch_results_as_graph(self, labels, computed_values, num_vertices, mask):
         e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
+        e_ = 1 if self.args.get('--no_labels') else e
         results = np.transpose(computed_values)  # (b, e * v * o)
         results_masked = np.multiply(results, mask)  # (b, e * v * o)
-        results_reshaped = np.reshape(results_masked, [-1, e, v, o])  # (b, e, v, o)
+        results_reshaped = np.reshape(results_masked, [-1, e_, v, o])  # (b, e, v, o)
 
         targets = np.transpose(labels)  # (b, e * v * o)
-        targets_reshaped = np.reshape(targets, [-1, e, v, o])
+        targets_reshaped = np.reshape(targets, [-1, e_, v, o])
 
         for i, result in enumerate(results_reshaped):
             target = targets_reshaped[i]
