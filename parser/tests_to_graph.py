@@ -11,7 +11,7 @@ class ToGraphTests(unittest.TestCase):
             '3\tMonday\t_\tNNP\tNNP\t_\t0\tROOT\t_\t_\n']
 
         result = tg.process_sentence(
-            sentence_list, problem='identity')
+            sentence_list, problem='identity', dep_list=dep_list)
 
         expected = [[3, 12, 1], [3, 26, 2], [0, 9, 3]]
 

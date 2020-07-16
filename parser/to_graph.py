@@ -66,6 +66,7 @@ def process_sentence(sentence_list, dep_list, problem='root',
         problem=problem, selected_id=selected_id,
         target_id=target_id, sentence_list=sentence_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
+    
     return sentence_dict
 
 def get_random_node(sentence_list):
@@ -171,7 +172,10 @@ def get_dep_list(bank_type):
                 line_as_list = line.split('\t')
                 dep = line_as_list[7].strip()
                 dep_set.add(dep)
-    return list(dep_set)
+
+    dep_list = list(dep_set)
+    dep_list.sort()
+    return dep_list
 def main():
     problem = sys.argv[1]
     if problem == 'btb':
@@ -205,6 +209,7 @@ def main():
 
                             output_file.write(json.dumps(sentence_dict))
                             new_sentence_list_in = []
+                            new_sentence_list_out = []
                             count += 1
 
                             if i != len(lines_in) - 1:
@@ -256,4 +261,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #python to_graph.py id en-wsj-std-dev-stanford-3.3.0-tagged.conll
+    #python to_graph.py identity en-wsj-std-dev-stanford-3.3.0-tagged.conll
+    #python to_graph.py btb en-wsj-std-dev-stanford-3.3.0-tagged.conll en-wsj-ym-nivre-dev.conll
