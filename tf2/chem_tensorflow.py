@@ -55,7 +55,7 @@ class ChemModel(object):
         train_file, valid_file = get_train_and_validation_files(self.args)
         return {
             'batch_size': 30,
-            'num_epochs': 350,
+            'num_epochs': 500,
             'patience': 25,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
@@ -113,6 +113,8 @@ class ChemModel(object):
         log_dir = args.get('--log_dir') or '.'
         os.makedirs(log_dir, exist_ok=True)
         self.log_file = os.path.join(log_dir, "%s_log.json" % self.run_id)
+        self.valid_results_file = os.path.join(log_dir, "%s_valid.txt" % self.run_id)
+        self.train_results_file = os.path.join(log_dir, "%s_train.txt" % self.run_id)
         self.best_model_file = os.path.join(log_dir, "%s_model_best.pickle" % self.run_id)
         tb_log_dir = os.path.join(log_dir, "tb", self.run_id)
         os.makedirs(tb_log_dir, exist_ok=True)
@@ -402,7 +404,7 @@ class ChemModel(object):
         steps = 0
         acc_las, acc_uas = 0, 0
         batch_iterator = ThreadedIterator(self.make_minibatch_iterator(data, is_training), max_queue_size=5)
-        all_labels, all_computed_values, all_num_vertices, all_masks = [], [], [], []
+        all_labels, all_computed_values, all_num_vertices, all_masks, all_ids = [], [], [], [], []
 
         for step, batch_data in enumerate(batch_iterator):
             num_graphs = batch_data[self.placeholders['num_graphs']]
@@ -419,7 +421,7 @@ class ChemModel(object):
                           self.ops['m'], self.placeholders['adjacency_matrix'],
                           self.ops['edge_weights'], self.ops['h'], self.ops['h_gru'],
                           self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
-                          self.ops['_am']
+                          self.ops['_am'], self.placeholders['sentences_id']
                           ]
             if is_training:
                 #TODO: change this back to normal
@@ -451,6 +453,7 @@ class ChemModel(object):
             edge_weight_dkp = result[21]
             m1 = result[22]
             _am = result[23]
+            sentences_id = result[24]
             loss_ = result[0]
 
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
@@ -482,6 +485,7 @@ class ChemModel(object):
             all_computed_values.append(computed_values)
             all_num_vertices.append(num_vertices)
             all_masks.append(node_mask)
+            all_ids.append(sentences_id)
 
         # if not is_training:
         #     set_trace()
@@ -491,12 +495,12 @@ class ChemModel(object):
         instance_per_sec = processed_graphs / (time.time() - start_time)
         acc_las = acc_las / processed_graphs
         acc_uas = acc_uas / processed_graphs
-        if acc_las > 0.65:
-            self.print_all_results_as_graph(
-                all_labels=all_labels, all_computed_values=all_computed_values,
-                all_num_vertices=all_num_vertices, all_masks=all_masks)
+        # if acc_las > 0.65:
+        #     self.print_all_results_as_graph(
+        #         all_labels=all_labels, all_computed_values=all_computed_values,
+        #         all_num_vertices=all_num_vertices, all_masks=all_masks)
 
-        return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas
+        return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids
 
     def train(self):
         log_to_save = []
@@ -507,7 +511,7 @@ class ChemModel(object):
         print("Average val batch size: %.2f\n" % avg_val_batch_size)
         with self.graph.as_default():
             if self.args.get('--restore') is not None:
-                _, valid_accs, _, _, steps, valid_las, valid_uas = \
+                _, valid_accs, _, _, steps, valid_las, valid_uas, _, _, _, _, _ = \
                     self.run_epoch("Resumed (validation)", self.valid_data, False)
                 best_val_acc = np.sum(valid_accs)
                 best_val_acc_epoch = 0
@@ -516,7 +520,8 @@ class ChemModel(object):
                 (best_val_acc, best_val_acc_epoch) = (float("+inf"), 0)
             for epoch in range(1, self.params['num_epochs'] + 1):
                 print("== Epoch %i" % epoch)
-                train_loss, train_accs, train_errs, train_speed, train_steps, train_las, train_uas = \
+                train_loss, train_accs, train_errs, train_speed, train_steps, train_las,\
+                train_uas, train_labels, train_values, train_v, train_masks, train_ids = \
                     self.run_epoch("epoch %i (training)" % epoch, self.train_data, True, self.train_step_id)
                 self.train_step_id += train_steps
                 accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in zip(self.params['task_ids'], train_accs)])
@@ -526,7 +531,8 @@ class ChemModel(object):
                                                                                                         errs_str,
                                                                                                         train_speed))
                 print("Train Attachment scores - LAS : %.2f - UAS : %.2f" % (train_las, train_uas))
-                valid_loss, valid_accs, valid_errs, valid_speed, valid_steps, valid_las, valid_uas = \
+                valid_loss, valid_accs, valid_errs, valid_speed, valid_steps, valid_las, \
+                valid_uas, valid_labels, valid_values, valid_v, valid_masks, valid_ids = \
                     self.run_epoch("epoch %i (validation)" % epoch, self.valid_data, False, self.valid_step_id)
                 self.valid_step_id += valid_steps
 
@@ -553,6 +559,8 @@ class ChemModel(object):
                 # val_acc = np.sum(valid_accs)  # type: float
                 # val_acc = 1-valid_las
                 # if val_acc < best_val_acc:
+
+                ##here look at train_las and print valid las
                 if val_acc < best_val_acc:
 
                     self.save_progress(self.best_model_file, self.train_step_id, self.valid_step_id)
@@ -560,9 +568,20 @@ class ChemModel(object):
                         val_acc, best_val_acc, self.best_model_file))
                     best_val_acc = val_acc
                     best_val_acc_epoch = epoch
+
+                    self.save_results(
+                        labels=valid_labels, values=valid_values, num_vertices=valid_v,
+                        masks=valid_masks, ids=valid_ids)
                 elif epoch - best_val_acc_epoch >= self.params['patience']:
                     print("Stopping training after %i epochs without improvement on validation accuracy." % self.params['patience'])
                     break
+
+    def save_results(self, labels, values, num_vertices, masks, ids):
+        with open(self.valid_results_file, 'w') as out_file:
+            self.print_all_results_as_graph(
+                all_labels=labels, all_computed_values=values,
+                all_num_vertices=num_vertices, all_masks=masks,
+                all_ids=ids, out_file=out_file)
 
     def save_progress(self, model_path: str, train_step: int, valid_step: int) -> None:
         weights_to_save = {}

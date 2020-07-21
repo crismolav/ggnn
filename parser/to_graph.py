@@ -15,7 +15,7 @@ POS_list = [
 sample_dep_list = ['ROOT', 'det', 'nsubj', 'aux']
 
 def process_sentence(sentence_list, dep_list, problem='root',
-                     sentence_list_out=None, dep_list_out=None):
+                     sentence_list_out=None, dep_list_out=None, sentence_id=None):
     graph = []
     target_list = []
     sentence_dict = {}
@@ -66,6 +66,7 @@ def process_sentence(sentence_list, dep_list, problem='root',
         problem=problem, selected_id=selected_id,
         target_id=target_id, sentence_list=sentence_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
+    sentence_dict["id"] = str(sentence_id).zfill(5)
     
     return sentence_dict
 
@@ -205,7 +206,7 @@ def main():
                             sentence_dict = process_sentence(
                                 sentence_list=new_sentence_list_in, problem=problem,
                                 dep_list=dep_list_in, sentence_list_out=new_sentence_list_out,
-                                dep_list_out=dep_list_out)
+                                dep_list_out=dep_list_out, sentence_id=count)
 
                             output_file.write(json.dumps(sentence_dict))
                             new_sentence_list_in = []
@@ -243,7 +244,8 @@ def main():
                 for i, line in enumerate(lines):
                     if line.strip() == '':
                         sentence_dict = process_sentence(
-                            sentence_list=new_sentence_list, problem=problem, dep_list=dep_list)
+                            sentence_list=new_sentence_list, problem=problem, dep_list=dep_list,
+                            sentence_id=i)
 
                         output_file.write(json.dumps(sentence_dict))
                         new_sentence_list = []
