@@ -61,7 +61,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
-            'hidden_size': 250,
+            'hidden_size': 450,
             'num_timesteps': 1,
             'use_graph': True,
 
