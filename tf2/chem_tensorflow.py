@@ -62,7 +62,7 @@ class ChemModel(object):
             'out_layer_dropout_keep_prob': 1.0,
 
             'hidden_size': 350,
-            'num_timesteps': 7,
+            'num_timesteps': 4,
             'use_graph': True,
 
             'tie_fwd_bkwd': True,
@@ -452,7 +452,7 @@ class ChemModel(object):
             h_gru = result[20]
             edge_weight_dkp = result[21]
             m1 = result[22]
-            _am = result[23]
+            # _am = result[23]
             sentences_id = result[24]
             loss_ = result[0]
 

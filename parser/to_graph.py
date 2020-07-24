@@ -67,7 +67,7 @@ def process_sentence(sentence_list, dep_list, problem='root',
         target_id=target_id, sentence_list=sentence_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
     sentence_dict["id"] = str(sentence_id).zfill(5)
-    
+
     return sentence_dict
 
 def get_random_node(sentence_list):
