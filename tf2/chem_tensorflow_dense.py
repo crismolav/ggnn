@@ -209,7 +209,8 @@ class DenseGGNNChemModel(ChemModel):
 
     def compute_timestep_normal(self, h, e, v, h_dim):
         #h: BTB: [e * v * b * v, h] ID: [e* b* v, h] else : [b * v, h]
-        for edge_type in range(self.num_edge_types):
+        # for edge_type in range(self.num_edge_types):
+        for edge_type in range(1):
             # 'edge_weights' : [e, h, h]
             m = tf.matmul(h, tf.nn.dropout(
                 self.weights['edge_weights'][edge_type],
@@ -804,6 +805,17 @@ class DenseGGNNChemModel(ChemModel):
 
         return acc_las/b, acc_uas/b
 
+    def get_results_reshaped(self, targets, computed_values, mask, num_vertices):
+        e, v = self.num_edge_types, num_vertices
+        e_ = 1 if self.args.get('--no_labels') else e
+
+        mask_reshaped = np.transpose(mask)  # [b, e * v' * v]
+        results_masked = np.multiply(computed_values, mask_reshaped)
+        results_reshaped = np.reshape(results_masked, [-1, e_, v, v])
+
+        targets_reshaped = np.reshape(targets, [-1, e_, v, v])
+        return mask_reshaped, results_reshaped, targets_reshaped
+
     def print_all_results_as_graph(
             self, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids=None, out_file=None):
         max_i = 8
@@ -818,8 +830,18 @@ class DenseGGNNChemModel(ChemModel):
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, out_file=out_file)
 
-
     def print_batch_results_as_graph(self, labels, computed_values, num_vertices, mask, ids=None, out_file=None):
+        if self.args['--pr'] in ['btb']:
+            self.print_batch_results_as_graph_btb(
+                labels=labels, computed_values=computed_values, num_vertices=num_vertices,
+                mask=mask, ids=ids, out_file=out_file)
+        else:
+            self.print_batch_results_as_graph_others(
+                labels=labels, computed_values=computed_values, num_vertices=num_vertices,
+                mask=mask, ids=ids, out_file=out_file)
+
+    def print_batch_results_as_graph_others(self, labels, computed_values, num_vertices,
+                                            mask, ids=None, out_file=None):
         e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
         e_ = 1 if self.args.get('--no_labels') else e
         results = np.transpose(computed_values)  # (b, e * v * o)
@@ -841,6 +863,26 @@ class DenseGGNNChemModel(ChemModel):
             else:
                 out_file.write("id %s target vs predicted: \n%s vs \n%s\n" % (
                 id, target_graph, result_graph))
+
+    def print_batch_results_as_graph_btb(self, labels, computed_values, num_vertices,
+                                         mask, ids=None, out_file=None):
+        mask_reshaped, results_reshaped, targets_reshaped = self.get_results_reshaped(
+            targets=labels, computed_values=computed_values, mask=mask,
+            num_vertices=num_vertices)
+
+        for i, result in enumerate(results_reshaped):
+            target = targets_reshaped[i]
+            id = ids[i]
+            target_graph = adj_mat_to_target(adj_mat=target)
+            result_graph = adj_mat_to_target(
+                adj_mat=result, is_probability=True, true_target=target_graph)
+            if out_file is None:
+                print("id %s target vs predicted: \n%s vs \n%s\n" % (
+                    id, target_graph, result_graph))
+            else:
+                out_file.write("id %s target vs predicted: \n%s vs \n%s\n" % (
+                    id, target_graph, result_graph))
+
 
     @staticmethod
     def get_las_uas(target_graph, result_graph):
