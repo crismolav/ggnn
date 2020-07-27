@@ -14,10 +14,11 @@ POS_list = [
 
 sample_dep_list = ['ROOT', 'det', 'nsubj', 'aux']
 
-def process_sentence(sentence_list, dep_list, problem='root',
-                     sentence_list_out=None, dep_list_out=None, sentence_id=None):
+def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=None,
+                     dep_list_out=None, sentence_id=None, pos_list=None):
     graph = []
     target_list = []
+    sentence_pos_list = []
     sentence_dict = {}
     target_id = None
     dependencies_set = set()
@@ -36,7 +37,7 @@ def process_sentence(sentence_list, dep_list, problem='root',
         edge_type = ref_dep_list.index(dep) + 1
         new_edge = [int(father), edge_type, int(id)]
         graph.append(new_edge)
-
+        sentence_pos_list.append(pos)
         if problem == 'root' and int(father) == 0:
             target_id = int(id)
             target_list.append([target_id])
@@ -64,7 +65,8 @@ def process_sentence(sentence_list, dep_list, problem='root',
     sentence_dict["graph"]   = graph
     sentence_dict["node_features"] = get_node_features(
         problem=problem, selected_id=selected_id,
-        target_id=target_id, sentence_list=sentence_list)
+        target_id=target_id, sentence_list=sentence_list,
+        sentence_pos_list=sentence_pos_list, pos_list=pos_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
     sentence_dict["id"] = str(sentence_id).zfill(5)
 
@@ -108,7 +110,8 @@ def get_node_feature(problem, pos, id):
         except:
             print("POS %s not in list"%pos)
 
-def get_node_features(problem, selected_id, target_id, sentence_list):
+def get_node_features(problem, selected_id, target_id, sentence_list,
+                      sentence_pos_list=None, pos_list=None):
     last_node = sentence_list[-1]
     last_id = int(last_node.split('\t')[0])
     node_features = []
@@ -119,9 +122,11 @@ def get_node_features(problem, selected_id, target_id, sentence_list):
         node_features = [[0, 0]]*(last_id+1)
         node_features[selected_id] = [1, 0]
         node_features[target_id] = [0, 1]
-    elif problem in ['identity', 'id_sample', 'btb']:
+    elif problem in ['identity', 'id_sample']:
         node_features = [[0] for _ in range(0, last_id+1)]
-
+    elif problem in ['btb']:
+        #we add node zero
+        node_features = [0] + [pos_list.index(x) for x in sentence_pos_list]
     return node_features
 
 def get_new_file_path(problem, file_name):
@@ -177,6 +182,36 @@ def get_dep_list(bank_type):
     dep_list = list(dep_set)
     dep_list.sort()
     return dep_list
+
+def get_dep_and_pos_list(bank_type):
+    if bank_type == 'nivre':
+        file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll']
+    else:
+        file_names = ['en-wsj-std-dev-stanford-3.3.0-tagged.conll',
+                      'en-wsj-std-test-stanford-3.3.0-tagged.conll']
+    dep_set = set()
+    pos_set = set()
+    for file_name in file_names:
+        file_path = get_file_path(file_name=file_name)
+        with open(file_path, 'r') as input_file:
+            lines = input_file.readlines()
+            for i, line in enumerate(lines):
+                if line.strip() == '':
+                    continue
+                line_as_list = line.split('\t')
+                pos = line_as_list[3]
+                dep = line_as_list[7].strip()
+                pos_set.add(pos)
+                dep_set.add(dep)
+
+    dep_list = list(dep_set)
+    pos_list = list(pos_set)
+    dep_list.sort()
+    pos_list.sort()
+    pos_list = ['zero'] + pos_list
+
+    return dep_list, pos_list
+
 def main():
     problem = sys.argv[1]
     if problem == 'btb':
@@ -189,8 +224,8 @@ def main():
 
         count = 0
 
-        dep_list_in = get_dep_list(bank_type='std')
-        dep_list_out = get_dep_list(bank_type='nivre')
+        dep_list_in, pos_list = get_dep_and_pos_list(bank_type='std')
+        dep_list_out, _ = get_dep_and_pos_list(bank_type='nivre')
 
         with open(file_path_in, 'r') as input_file_in:
             with open(file_path_out, 'r') as input_file_out:
@@ -206,7 +241,7 @@ def main():
                             sentence_dict = process_sentence(
                                 sentence_list=new_sentence_list_in, problem=problem,
                                 dep_list=dep_list_in, sentence_list_out=new_sentence_list_out,
-                                dep_list_out=dep_list_out, sentence_id=count)
+                                dep_list_out=dep_list_out, sentence_id=count, pos_list=pos_list)
 
                             output_file.write(json.dumps(sentence_dict))
                             new_sentence_list_in = []
@@ -234,7 +269,7 @@ def main():
 
         count = 0
         bank_type = 'nivre' if 'nivre' in file_name else 'std'
-        dep_list = get_dep_list(bank_type=bank_type)
+        dep_list, pos_list = get_dep_and_pos_list(bank_type=bank_type)
 
         with open(file_path, 'r') as input_file:
             with open(new_file_path, 'w') as output_file:
@@ -245,7 +280,7 @@ def main():
                     if line.strip() == '':
                         sentence_dict = process_sentence(
                             sentence_list=new_sentence_list, problem=problem, dep_list=dep_list,
-                            sentence_id=i)
+                            sentence_id=i, pos_list=pos_list)
 
                         output_file.write(json.dumps(sentence_dict))
                         new_sentence_list = []

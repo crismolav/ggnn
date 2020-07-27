@@ -12,7 +12,7 @@ from pdb import set_trace
 from utils import MLP, ThreadedIterator, SMALL_NUMBER
 import sys
 sys.path.insert(1, './parser')
-from to_graph import get_dep_list, sample_dep_list
+from to_graph import get_dep_and_pos_list, sample_dep_list
 
 dep_tree = True
 
@@ -73,7 +73,7 @@ class ChemModel(object):
             'train_file': train_file,
             'valid_file': valid_file,
             'restrict': self.args.get("--restrict_data"),
-            'output_size': 1 if self.args['--pr'] not in ['identity', 'btb'] else 150
+            'output_size': 1 if self.args['--pr'] not in ['identity'] else 150
         }
 
     def get_id_sample_params(self):
@@ -102,7 +102,8 @@ class ChemModel(object):
 
     def __init__(self, args):
         self.args = args
-
+        if 'dummy' in args:
+            return
         # Collect argument things:
         data_dir = ''
         if '--data_dir' in args and args['--data_dir'] is not None:
@@ -139,9 +140,9 @@ class ChemModel(object):
         self.max_num_vertices = 0
         self.num_edge_types = 0
         self.annotation_size = 0
-        self.dep_list = sample_dep_list if self.args.get('--sample') else get_dep_list(
+        self.dep_list, self.pos_list = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
-        self.dep_list_out = sample_dep_list if self.args.get('--sample') else get_dep_list(
+        self.dep_list_out, _ = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='nivre')
 
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
@@ -203,9 +204,15 @@ class ChemModel(object):
 
         self.num_edge_types = max([len(self.dep_list), self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2)])
 
-        self.annotation_size = max(self.annotation_size, len(data[0]["node_features"][0]))
+        self.annotation_size = self.get_annotation_size(data=data)
 
         return self.process_raw_graphs(data, is_training_data)
+
+    def get_annotation_size(self, data):
+        if self.args['--pr'] in ['btb']:
+            return len(self.pos_list)
+        else:
+            return max(self.annotation_size, len(data[0]["node_features"][0]))
 
     @staticmethod
     def graph_string_to_array(graph_string: str) -> List[List[int]]:
@@ -223,9 +230,14 @@ class ChemModel(object):
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(tf.float32,
                                                               [len(self.params['task_ids']), None],
                                                               name='target_mask')
-        elif self.args['--pr'] in ['identity', 'btb']:
+        elif self.args['--pr'] in ['identity']:
             self.placeholders['target_values'] = tf.compat.v1.placeholder(
                 tf.float32, [None, None, self.num_edge_types, None], name='target_values')
+            self.placeholders['target_mask'] = tf.compat.v1.placeholder(
+                tf.float32, [self.num_edge_types, None], name='target_mask')
+        elif self.args['--pr'] in ['btb']:
+            self.placeholders['target_values'] = tf.compat.v1.placeholder(
+                tf.float32, [None, self.num_edge_types, None, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
                 tf.float32, [self.num_edge_types, None], name='target_mask')
         else:
@@ -258,18 +270,26 @@ class ChemModel(object):
 
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
-                                                        self.weights['regression_transform_task%i' % task_id]) # ID ( e * v * o,  b)
+                                                        self.weights['regression_transform_task%i' % task_id])
+                # BTB [b, e * v' * v] ID [e * v * o,  b]  o is 1 for BTB
                 task_target_mask = self.placeholders['target_mask'][internal_id, :]
+                # ID [b] else: [b]
                 task_target_num = tf.reduce_sum(input_tensor=task_target_mask) + SMALL_NUMBER
-
+                # ID and else: b
                 if self.args['--pr'] == 'molecule':
                     labels = self.placeholders['target_values'][internal_id, :]
                     mask = tf.transpose(a=self.placeholders['node_mask'])
-                elif self.args['--pr'] in ['identity', 'btb']:
-                    labels = self.placeholders['target_values']  # (o,v,e,b)
-                    labels = tf.transpose(a=labels, perm=[2, 1, 0, 3])  # (e,v,o,b)
-                    labels = tf.reshape(labels, [-1, self.placeholders['num_graphs']]) # (e * v * o,b)
-                    mask = tf.transpose(a=self.placeholders['node_mask'])  # (e * v * o,b)
+                elif self.args['--pr'] in ['identity']:
+                    labels = self.placeholders['target_values']  # [o, v, e, b]
+                    labels = tf.transpose(a=labels, perm=[2, 1, 0, 3])  # [e, v, o, b]
+                    labels = tf.reshape(labels, [-1, self.placeholders['num_graphs']]) # [e * v * o, b]
+                    # node_mask ID [b, e * v * o]
+                    mask = tf.transpose(a=self.placeholders['node_mask'])  # [e * v * o,b]
+                    # ID: [e * v * o,b]
+                elif self.args['--pr'] in ['btb']:
+                    labels = self.placeholders['target_values']  # [b, e, v', v]
+                    labels = tf.reshape(labels, [self.placeholders['num_graphs'], -1])  # [b, e * v' * v]
+                    mask = self.placeholders['node_mask'] #[b, e * v * v]
                 else:
                     labels = self.placeholders['target_values'][:, internal_id, :]
                     mask = tf.transpose(a=self.placeholders['node_mask'])
@@ -299,9 +319,6 @@ class ChemModel(object):
                     masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
                     task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
                     #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
-                    # Normalise loss to account for fewer task-specific examples in batch:
-                    # task_loss = task_loss * (
-                    #             1.0 / (self.params['task_sample_ratios'].get(task_id) or 1.0))
 
                     self.ops['accuracy_task%i' % task_id] = task_loss
                     self.ops['losses'].append(task_loss)
@@ -310,12 +327,21 @@ class ChemModel(object):
                     self.ops['node_mask'] = tf.transpose(mask)
                     self.ops['masked_loss'] = masked_loss
                     self.ops['new_mask'] =  new_mask
+                    self.ops['task_target_mask'] = task_target_mask
 
         self.ops['loss'] = tf.reduce_sum(input_tensor=self.ops['losses'])
 
     def reduce_edge_dimension(self, computed_values, labels, mask):
+        if self.args['--pr'] in ['btb']:
+            return self.reduce_edge_dimension_btb(
+                computed_values=computed_values, labels=labels, mask=mask)
+        else:
+            return self.reduce_edge_dimension_other(
+                computed_values=computed_values, labels=labels, mask=mask)
+
+    def reduce_edge_dimension_other(self, computed_values, labels, mask):
         # computed_values, labels, mask ( e * v * o,  b)
-        # o, v, e, b = oveb
+
         o = self.params['output_size']
         v = self.placeholders['num_vertices']
         e = self.num_edge_types
@@ -335,6 +361,27 @@ class ChemModel(object):
 
         return computed_values, labels, mask
 
+    def reduce_edge_dimension_btb(self, computed_values, labels, mask):
+        # computed_values, labels, mask [b, e * v' * v]
+
+        o = self.params['output_size']
+        v = self.placeholders['num_vertices']
+        e = self.num_edge_types
+        b = self.placeholders['num_graphs']
+
+        computed_values = tf.reshape(computed_values, [b, e, v, v]) # [b, e, v', v]
+        labels = tf.reshape(labels, [b, e, v, v]) # [b, e, v', v]
+        mask = tf.reshape(mask,[b, e, v, v]) # [b, e, v', v]
+
+        computed_values = tf.math.reduce_sum(computed_values, axis = 1)
+        labels = tf.math.reduce_sum(labels, axis=1)
+        mask = tf.math.reduce_sum(mask, axis=1)
+
+        computed_values = tf.reshape(computed_values, [b, v * v]) # [b, v', v]
+        labels = tf.reshape(labels, [b, v * v]) # [b, v', v]
+        mask = tf.reshape(mask, [b, v * v]) # [b, v', v]
+
+        return computed_values, labels, mask
 
     def calculate_losses_for_molecules(self, computed_values, internal_id, task_id):
         diff = computed_values - self.placeholders['target_values'][internal_id, :]
@@ -421,7 +468,7 @@ class ChemModel(object):
                           self.ops['m'], self.placeholders['adjacency_matrix'],
                           self.ops['edge_weights'], self.ops['h'], self.ops['h_gru'],
                           self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
-                          self.ops['_am'], self.placeholders['sentences_id']
+                          self.ops['_am'], self.placeholders['sentences_id'],
                           ]
             if is_training:
                 #TODO: change this back to normal
@@ -431,6 +478,7 @@ class ChemModel(object):
             else:
                 # it is not trainining because we are not requesting the self.ops['train_step'] parametr
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
+
 
             result = self.sess.run(fetch_list, feed_dict=batch_data)
             #TODO: delete
@@ -454,6 +502,8 @@ class ChemModel(object):
             m1 = result[22]
             # _am = result[23]
             sentences_id = result[24]
+
+
             loss_ = result[0]
 
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
@@ -466,7 +516,8 @@ class ChemModel(object):
             try:
                 las, uas = self.get_batch_attachment_scores(
                     targets=labels, computed_values= computed_values,
-                    mask=node_mask, num_vertices=num_vertices)
+                    mask=node_mask, num_vertices=num_vertices,
+                    sentences_id=sentences_id)
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
             except:

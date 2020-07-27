@@ -1,8 +1,9 @@
 import unittest
-import chem_tensorflow_dense as chem_tfd
-import to_graph as tg
 import numpy as np
 from pdb import set_trace
+import sys
+sys.path.insert(1, './tf2')
+import chem_tensorflow_dense as chem_tfd
 
 class ChemTests(unittest.TestCase):
     def test_adj_mat_to_target__simple(self):
@@ -85,5 +86,52 @@ class ChemTests(unittest.TestCase):
         expected = 0, 0
 
         self.assertEqual(expected, result)
+
+    def test_get_mask__id(self):
+        args = {'--pr':'identity', 'dummy': True}
+        model = chem_tfd.DenseGGNNChemModel(args)
+        model.num_edge_types = 2
+        model.params = {}
+        model.params['output_size'] = 4
+        chosen_bucket_size = 3
+        n_active_nodes = 2
+
+        result = model.get_mask(n_active_nodes, chosen_bucket_size)
+        expected = np.array([
+            [1., 1., 0., 0.],
+            [1., 1., 0., 0.],
+            [0., 0., 0., 0.],
+            [1., 1., 0., 0.],
+            [1., 1., 0., 0.],
+            [0., 0., 0., 0.]])
+
+        self.assertTrue((expected == result).all())
+
+    def test_get_mask__btb(self):
+        args = {'--pr': 'btb', 'dummy': True}
+        model = chem_tfd.DenseGGNNChemModel(args)
+        model.num_edge_types = 2
+        model.params = {}
+        model.params['output_size'] = 1
+        chosen_bucket_size = 3
+        n_active_nodes = 2
+
+        result = model.get_mask(n_active_nodes, chosen_bucket_size)
+        expected = np.array(
+            [[1., 1., 0.],
+            [1., 1., 0.],
+            [0., 0., 0.],
+            [1., 1., 0.],
+            [1., 1., 0.],
+            [0., 0., 0.]])
+
+        self.assertTrue((expected == result).all())
+
+if __name__ == "__main__":
+    unittest.main()
+    '''
+    example of how to run
+    python tf2/tests_chem.py ChemTests
+    '''
 
 
