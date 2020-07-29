@@ -61,7 +61,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
-            'hidden_size': 350,
+            'hidden_size': 100 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -353,7 +353,7 @@ class ChemModel(object):
 
         computed_values = tf.math.reduce_sum(computed_values, axis = 0)
         labels = tf.math.reduce_sum(labels, axis=0)
-        mask = tf.math.reduce_sum(mask, axis=0)
+        mask = tf.math.reduce_mean(mask, axis=0)
 
         computed_values = tf.reshape(computed_values, [v * o, b])
         labels = tf.reshape(labels, [v * o, b])
@@ -375,7 +375,7 @@ class ChemModel(object):
 
         computed_values = tf.math.reduce_sum(computed_values, axis = 1)
         labels = tf.math.reduce_sum(labels, axis=1)
-        mask = tf.math.reduce_sum(mask, axis=1)
+        mask = tf.math.reduce_mean(mask, axis=1)
 
         computed_values = tf.reshape(computed_values, [b, v * v]) # [b, v', v]
         labels = tf.reshape(labels, [b, v * v]) # [b, v', v]

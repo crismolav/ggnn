@@ -55,16 +55,15 @@ def graph_to_adj_mat_dir(graph, max_n_vertices, num_edge_types):
 
     for i, (src, e, dest) in enumerate(graph):
         amat[e-1, dest, src] = 1
-
+    #[e, v', v]
     return amat
 
 def get_adj_mat_with_annotations(graph, node_features,  max_n_vertices, num_edge_types, annotation_size):
     amat = np.zeros((num_edge_types, max_n_vertices, max_n_vertices, annotation_size))
     for i, (src, e, dest) in enumerate(graph):
         #annotations start from node 1
-        index_annotation = node_features[dest-1]
+        index_annotation = node_features[dest]
         amat[e-1, dest, src, index_annotation] = 1
-
     return amat
 
 def target_to_adj_mat(target, max_n_vertices, num_edge_types, output_size, tie_fwd_bkwd=True):
@@ -158,11 +157,12 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['softmax_mask'] = tf.compat.v1.placeholder(
             tf.float32, [None, None], name='softmax_mask')
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
-        self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
-            tf.float32, [None, self.num_edge_types, None, None],
-            name='adjacency_matrix')     # [b, e, v, v]
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
-        self.__adjacency_matrix = tf.transpose(a=self.placeholders['adjacency_matrix'], perm=[1, 0, 2, 3])         # [e, b, v, v]
+        self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
+            tf.float32, [None, self.num_edge_types, None, None], name='adjacency_matrix')
+        # [b, e, v', v]
+        self.__adjacency_matrix = tf.transpose(a=self.placeholders['adjacency_matrix'], perm=[1, 0, 2, 3])
+        # [e, b, v', v]
         # weights
         self.weights['edge_weights'] = tf.Variable(glorot_init([self.num_edge_types, h_dim, h_dim]))
         if self.params['use_edge_bias']:
@@ -180,14 +180,14 @@ class DenseGGNNChemModel(ChemModel):
         h = self.placeholders['initial_node_representation']
         # BTB: [e, v, b, v', h] ID: [e, b, v, h] else : [b, v, h]    v' main dimension
         h = tf.reshape(h, [-1, h_dim])
-        # BTB: [e * v * b * v, h] ID: [e * b * v, h] else : [b * v, h]
+        # BTB: [e * v * b * v', h] ID: [e * b * v, h] else : [b * v, h]
 
         with tf.compat.v1.variable_scope("gru_scope") as scope:
             for i in range(self.params['num_timesteps']):
                 if i > 0:
                     tf.compat.v1.get_variable_scope().reuse_variables()
                 acts = self.compute_timestep(h, e, v, h_dim)
-                # BTB: [e * v * b * v, h] ID [e * b * v, h]  NL (b * v, h) (b * v, h)
+                # BTB: [e * v * b * v', h] ID [e * b * v, h]  NL (b * v, h) (b * v, h)
                 h = self.weights['node_gru'](acts, h)[1]
                 # BTB: [e * v * b * v', h] ID [e * b * v, h]  NL (b * v, h) (b * v, h)                                      # [b*v, h]
                 self.ops['h_gru'] = tf.identity(h)
@@ -204,19 +204,18 @@ class DenseGGNNChemModel(ChemModel):
             acts = self.compute_timestep_fast(h, e, v, h_dim)
         else:
             acts = self.compute_timestep_normal(h, e, v, h_dim)
-
+        # BTB [e, v, b, v', h] ID [e, b, v, h] [b, v, h]
         return acts
 
     def compute_timestep_normal(self, h, e, v, h_dim):
-        #h: BTB: [e * v * b * v, h] ID: [e* b* v, h] else : [b * v, h]
-        # for edge_type in range(self.num_edge_types):
-        for edge_type in range(1):
+        #h: BTB: [e * v * b * v', h] ID: [e* b* v, h] else : [b * v, h]
+        for edge_type in range(self.num_edge_types):
             # 'edge_weights' : [e, h, h]
             m = tf.matmul(h, tf.nn.dropout(
                 self.weights['edge_weights'][edge_type],
                 rate=1 - (self.placeholders[
                     'edge_weight_dropout_keep_prob'])))
-            # BTB: [e * v * b * v, h] ID: [e * b * v, h] else: [b*v, h]
+            # BTB: [e * v * b * v', h] ID: [e * b * v, h] else: [b*v, h]
             self.ops['m1'] = tf.identity(m)
 
             if self.args['--pr'] in ['identity']:
@@ -229,16 +228,18 @@ class DenseGGNNChemModel(ChemModel):
                 # edge_biases [e, 1, h]
                 m += self.weights['edge_biases'][edge_type]
                 # BTB [e, v, b, v, h] ID: [e, b, v, h] else [b, v, h]
+            # __adjacency_matrix[edge_type] (b, v', v)
+            # m BTB [e, v, b, v, h] ID [e, b, v, h] else [b, v, h]
             if edge_type == 0:
-                # __adjacency_matrix[edge_type] (b, v, v)
                 acts = tf.matmul(self.__adjacency_matrix[edge_type], m)
                 # BTB [e, v, b, v, h] ID (e, b, v, h)   (b, v, h)
             else:
+                # __adjacency_matrix[edge_type] (b, v', v)
                 # m: [b, v, h]
                 acts += tf.matmul(self.__adjacency_matrix[edge_type], m)  # (b, v, h)
 
         acts = tf.reshape(acts, [-1, h_dim])
-        # BTB [e * v * b * v, h] ID [e * b * v, h]  [b * v, h]
+        # BTB [e * v * b * v', h] ID [e * b * v, h]  [b * v, h]
         self.ops['acts'] = tf.identity(acts)
         self.ops['m'] = tf.identity(m)
         self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
@@ -248,13 +249,15 @@ class DenseGGNNChemModel(ChemModel):
         return acts
 
     def compute_timestep_fast(self, h, e, v, h_dim):
-        # h: # ID: [e* b* v, h] else : [b * v, h]
+        # h: BTB: [e * v * b * v', h] ID: [e* b* v, h] else : [b * v, h]
         # 'edge_weights' : [e, h, h]
         if self.args['--pr'] in ['identity', 'btb']:
-            h = tf.reshape(h, [e, -1, h_dim]) # ID: [e, b * v, h]
+            h = tf.reshape(h, [e, -1, h_dim])
+            # BTB: [e, v * b * v', h] ID: [e, b * v, h]
         m = tf.matmul(h, tf.nn.dropout(
             self.weights['edge_weights'],
-            rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))  # ID: (e, b * v, h)
+            rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))
+        # BTB: [e, v * b * v', h] ID: [e, b * v, h]
         self.ops['m1'] = tf.identity(m)
 
         if self.args['--pr'] not in ['identity', 'btb']:
@@ -265,13 +268,20 @@ class DenseGGNNChemModel(ChemModel):
             #edge_biases : [e, 1, h]
             m += self.weights['edge_biases']
 
-        if self.args['--pr'] in ['identity', 'btb']:
-            m = tf.reshape(m, [e, -1, v, h_dim])  # ID (e, b, v, h)
+        if self.args['--pr'] in ['identity']:
+            m = tf.reshape(m, [e, -1, v, h_dim])  #[e, b, v, h]
+        elif self.args['--pr'] in ['btb']:
+            m = tf.reshape(m, [e, v, -1, v, h_dim])  # [e, v, b, v', h]
+            m = tf.transpose(a=m, perm=[1, 0, 2, 3, 4]) # [v, e, b, v', h]
+        else:
+            m = tf.reshape(m, [-1, v, h_dim])  # [b, v, h]
 
-        # __adjacency_matrix (e, b, v, v)
-        acts = tf.matmul(self.__adjacency_matrix, m)  # ID (e, b, v, h)   (b, v, h)
-        # if self.args.get('--no_labels'):
-        #     acts = tf.math.reduce_sum(acts, axis=0) # NL (b, v, h)
+        # __adjacency_matrix (e, b, v', v)
+        # m BTB [v, e, b, v', h] ID [e, b, v, h] else [b, v, h]
+        acts = tf.matmul(self.__adjacency_matrix, m)
+        # BTB [v, e, b, v', h] ID [e, b, v, h] [b, v, h]
+        if self.args['--pr'] in ['btb']:
+            acts = tf.transpose(a=m, perm=[1, 0, 2, 3, 4]) #BTB [e, v, b, v', h]
         acts = tf.reshape(acts, [-1, h_dim])  # ID (e * b * v, h) (b * v, h)
         self.ops['acts'] = tf.identity(acts)
         self.ops['m'] = tf.identity(m)
@@ -281,7 +291,7 @@ class DenseGGNNChemModel(ChemModel):
         return acts
 
     def gated_regression(self, last_h, regression_gate, regression_transform):
-        # BTB: [e, v, b, v', h] last_h: [e, b, v, h] or [b, v, h]
+        # last_h BTB: [e, v, b, v', h] ID [e, b, v, h] or [b, v, h]
         gate_input = tf.concat([last_h, self.placeholders['initial_node_representation']], axis = -1)
         # BTB: [e, v, b, v', 2h] ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]]) # ID [e * b * v, 2h] else [b * v, 2h]
@@ -360,11 +370,12 @@ class DenseGGNNChemModel(ChemModel):
                 continue
             chosen_bucket_idx = np.argmax(bucket_sizes > max([v for e in d['graph']
                                                                 for v in [e[0], e[2]]]))
-            n_active_nodes = len(d["node_features"])  #node features start from node 1.
+            n_active_nodes = len(d["node_features"])
             chosen_bucket_size = bucket_sizes[chosen_bucket_idx]
             node_features_vector = self.vectorize_node_features(node_features=d["node_features"])
             bucketed_dict = {
-                'adj_mat':  graph_to_adj_mat_dir(d['graph'], chosen_bucket_size, self.num_edge_types), #self.params['tie_fwd_bkwd']),
+                'adj_mat':  graph_to_adj_mat_dir(d['graph'], chosen_bucket_size, self.num_edge_types),
+                #[e, v', v]
                 'init': node_features_vector + [[0 for _ in range(x_dim)] for __ in
                                               range(chosen_bucket_size - n_active_nodes)],
                 'labels':  self.get_labels_padded(
@@ -501,12 +512,12 @@ class DenseGGNNChemModel(ChemModel):
         return new_annotations
 
     def pad_adj_matrix_annotations(self, adj_mat_annotations):
-        # adj_mat_annotations: [b, e, v1, v2, a]
+        # adj_mat_annotations: [b, e, v', v, a]
         new_annotations = np.pad(adj_mat_annotations,
            pad_width=[[0, 0], [0, 0], [0, 0], [0, 0], [0, self.params['hidden_size'] - self.annotation_size]],
-           mode='constant') # [b, e, v1, v2, h]
+           mode='constant') # [b, e, v', v, h]
 
-        new_annotations = np.transpose(new_annotations, [1, 3, 0, 2, 4]) # [e, v2, b, v1, h]
+        new_annotations = np.transpose(new_annotations, [1, 3, 0, 2, 4]) # [e, v, b, v', h]
 
         return new_annotations
 
@@ -598,12 +609,12 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['num_graphs']: num_graphs,
                 self.placeholders['num_vertices']: bucket_sizes[bucket],
                 self.placeholders['adjacency_matrix']: batch_data['adj_mat'],
+                #[b, e, v', v]
                 self.placeholders['node_mask']: batch_data['node_mask'], # [b, e * v * o]
                 self.placeholders['graph_state_keep_prob']: dropout_keep_prob,
                 self.placeholders['edge_weight_dropout_keep_prob']: dropout_keep_prob,
                 self.placeholders['sentences_id']: batch_data['sentences_id']
             }
-
             bucket_counters[bucket] += 1
             iteration = step
             avg_num += num_graphs
@@ -737,60 +748,22 @@ class DenseGGNNChemModel(ChemModel):
     def get_batch_attachment_scores(self, targets, computed_values, mask, num_vertices, sentences_id):
         if self.args['--pr'] not in ['identity', 'btb']:
             return 0, 0
-        elif self.args['--pr'] in ['btb']:
-            return self.get_batch_attachment_scores_btb(
-                targets=targets, computed_values=computed_values,
-                mask=mask, num_vertices=num_vertices, sentences_id=sentences_id)
         else:
-            return self.get_batch_attachment_scores_id(
+            return self.get_batch_attachment_scores_(
                 targets=targets, computed_values=computed_values,
                 mask=mask, num_vertices=num_vertices, sentences_id=sentences_id)
 
-    def get_batch_attachment_scores_id(self, targets, computed_values, mask, num_vertices,
+    def get_batch_attachment_scores_(self, targets, computed_values, mask, num_vertices,
                                        sentences_id):
         # mask (b,  e * v * o,)
         # computed_values (e * v * o, b)
         # target = labels (e * v * o, b)
-        e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
-        e_ = 1 if self.args.get('--no_labels') else e
-        results = np.transpose(computed_values) # (b, e * v * o)
-        results_masked = np.multiply(results, mask) # (b, e * v * o) # NL (b, v * o)
-        results_reshaped = np.reshape(results_masked, [-1, e_, v, o])  # (b, e, v, o)
-
-        targets = np.transpose(targets) # (b, e * v * o)
-        targets_reshaped = np.reshape(targets, [-1, e_, v, o])
+        mask_reshaped, results_reshaped, targets_reshaped = self.get_results_reshaped(
+            targets=targets, computed_values=computed_values, mask=mask,
+            num_vertices=num_vertices)
         acc_las = 0
         acc_uas = 0
-        b = targets.shape[0]
-
-        for i, result in enumerate(results_reshaped):
-            target = targets_reshaped[i]
-            target_graph = adj_mat_to_target(adj_mat=target)
-            result_graph = adj_mat_to_target(
-                adj_mat=result, is_probability=True, true_target=target_graph)
-
-            las, uas = self.get_las_uas(target_graph, result_graph)
-
-            acc_las += las
-            acc_uas += uas
-
-        return acc_las/b, acc_uas/b
-
-    def get_batch_attachment_scores_btb(self, targets, computed_values, mask, num_vertices,
-                                        sentences_id):
-        # computed_values, targets # [b, e * v' * v]
-        # mask [e * v' * v, b]
-        e, v = self.num_edge_types, num_vertices
-        e_ = 1 if self.args.get('--no_labels') else e
-
-        mask_reshaped = np.transpose(mask) #[b, e * v' * v]
-        results_masked = np.multiply(computed_values, mask_reshaped)
-        results_reshaped = np.reshape(results_masked, [-1, e_, v, v])
-
-        targets_reshaped = np.reshape(targets, [-1, e_, v, v])
-        acc_las = 0
-        acc_uas = 0
-        b = targets.shape[0]
+        b = targets_reshaped.shape[0]
 
         for i, result in enumerate(results_reshaped):
             target = targets_reshaped[i]
@@ -806,15 +779,28 @@ class DenseGGNNChemModel(ChemModel):
         return acc_las/b, acc_uas/b
 
     def get_results_reshaped(self, targets, computed_values, mask, num_vertices):
-        e, v = self.num_edge_types, num_vertices
-        e_ = 1 if self.args.get('--no_labels') else e
+        if self.args['--pr'] in ['identity']:
+            e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
+            e_ = 1 if self.args.get('--no_labels') else e
+            results = np.transpose(computed_values)  # (b, e * v * o)
+            results_masked = np.multiply(results, mask)  # (b, e * v * o) # NL (b, v * o)
+            results_reshaped = np.reshape(results_masked, [-1, e_, v, o])  # (b, e, v, o)
 
-        mask_reshaped = np.transpose(mask)  # [b, e * v' * v]
-        results_masked = np.multiply(computed_values, mask_reshaped)
-        results_reshaped = np.reshape(results_masked, [-1, e_, v, v])
+            targets = np.transpose(targets)  # (b, e * v * o)
+            targets_reshaped = np.reshape(targets, [-1, e_, v, o])
+            mask_reshaped = mask
+            return mask_reshaped, results_reshaped, targets_reshaped
 
-        targets_reshaped = np.reshape(targets, [-1, e_, v, v])
-        return mask_reshaped, results_reshaped, targets_reshaped
+        elif self.args['--pr'] in ['btb']:
+            e, v = self.num_edge_types, num_vertices
+            e_ = 1 if self.args.get('--no_labels') else e
+
+            mask_reshaped = np.transpose(mask)  # [b, e * v' * v]
+            results_masked = np.multiply(computed_values, mask_reshaped)
+            results_reshaped = np.reshape(results_masked, [-1, e_, v, v])
+
+            targets_reshaped = np.reshape(targets, [-1, e_, v, v]) # [b, e, v', v]
+            return mask_reshaped, results_reshaped, targets_reshaped
 
     def print_all_results_as_graph(
             self, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids=None, out_file=None):

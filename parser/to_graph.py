@@ -44,10 +44,10 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         elif problem == 'head' and int(id) == selected_id:
             target_id = int(father)
             target_list.append(get_node_as_vector(id=target_id, last_node=last_node))
-        elif problem in ['identity','id_sample']:
+        elif problem in ['identity','id_sample', 'btb_id']:
             target_unit = [int(father), int(edge_type)]
             target_list.append(target_unit)
-        elif problem in ['btb']:
+        elif problem in ['btb', 'btb_sample']:
             line_out = sentence_list_out[i]
             line_as_list_out = line_out.split('\t')
             father_out = line_as_list_out[6]
@@ -124,7 +124,7 @@ def get_node_features(problem, selected_id, target_id, sentence_list,
         node_features[target_id] = [0, 1]
     elif problem in ['identity', 'id_sample']:
         node_features = [[0] for _ in range(0, last_id+1)]
-    elif problem in ['btb']:
+    elif problem in ['btb', 'btb_id', 'btb_sample']:
         #we add node zero
         node_features = [0] + [pos_list.index(x) for x in sentence_pos_list]
     return node_features
@@ -147,10 +147,12 @@ def get_new_file_path(problem, file_name):
         new_file_name = file_name.replace(".conll", "_id.json")
         new_file_path = '%s/%s' % (new_file_folder, new_file_name)
 
-    elif problem in ['btb']:
+    elif problem in ['btb', 'btb_id']:
         new_file_name = file_name.replace(".conll", "_btb.json")
         new_file_path = '%s/%s' % (new_file_folder, new_file_name)
-
+    elif problem in ['btb_sample']:
+        new_file_name = file_name.replace(".conll", "_btb_sample.json")
+        new_file_path = '%s/%s' % (new_file_folder, new_file_name)
 
     return new_file_path
 
@@ -183,7 +185,7 @@ def get_dep_list(bank_type):
     dep_list.sort()
     return dep_list
 
-def get_dep_and_pos_list(bank_type):
+def get_dep_and_pos_list(bank_type, sample_size=None):
     if bank_type == 'nivre':
         file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll']
     else:
@@ -191,12 +193,17 @@ def get_dep_and_pos_list(bank_type):
                       'en-wsj-std-test-stanford-3.3.0-tagged.conll']
     dep_set = set()
     pos_set = set()
+
     for file_name in file_names:
+        count = 0
         file_path = get_file_path(file_name=file_name)
         with open(file_path, 'r') as input_file:
             lines = input_file.readlines()
             for i, line in enumerate(lines):
                 if line.strip() == '':
+                    count += 1
+                    if sample_size is not None and count == sample_size:
+                        break
                     continue
                 line_as_list = line.split('\t')
                 pos = line_as_list[3]
@@ -214,9 +221,11 @@ def get_dep_and_pos_list(bank_type):
 
 def main():
     problem = sys.argv[1]
-    if problem == 'btb':
+    if problem in ['btb', 'btb_id', 'btb_sample']:
         file_name_in = sys.argv[2]
         file_name_out = sys.argv[3]
+        sample_size = int(sys.argv[4]) if len(sys.argv) > 4 else None
+
         file_path_in = get_file_path(file_name=file_name_in)
         file_path_out = get_file_path(file_name=file_name_out)
 
@@ -224,8 +233,8 @@ def main():
 
         count = 0
 
-        dep_list_in, pos_list = get_dep_and_pos_list(bank_type='std')
-        dep_list_out, _ = get_dep_and_pos_list(bank_type='nivre')
+        dep_list_in, pos_list = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
+        dep_list_out, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
 
         with open(file_path_in, 'r') as input_file_in:
             with open(file_path_out, 'r') as input_file_out:
@@ -247,7 +256,8 @@ def main():
                             new_sentence_list_in = []
                             new_sentence_list_out = []
                             count += 1
-
+                            if sample_size is not None and count == sample_size:
+                                break
                             if i != len(lines_in) - 1:
                                 output_file.write(', ')
 
