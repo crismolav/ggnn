@@ -53,6 +53,11 @@ class ChemModel(object):
 
     def get_id_params(self):
         train_file, valid_file = get_train_and_validation_files(self.args)
+        if self.args['--pr'] in ['identity', 'btb']:
+            output_size = 150
+        else:
+            output_size = 1
+
         return {
             'batch_size': 30,
             'num_epochs': 500,
@@ -61,7 +66,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 1.0,
 
-            'hidden_size': 100 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 400 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -73,7 +78,7 @@ class ChemModel(object):
             'train_file': train_file,
             'valid_file': valid_file,
             'restrict': self.args.get("--restrict_data"),
-            'output_size': 1 if self.args['--pr'] not in ['identity'] else 150
+            'output_size': output_size
         }
 
     def get_id_sample_params(self):
@@ -237,7 +242,7 @@ class ChemModel(object):
                 tf.float32, [self.num_edge_types, None], name='target_mask')
         elif self.args['--pr'] in ['btb']:
             self.placeholders['target_values'] = tf.compat.v1.placeholder(
-                tf.float32, [None, self.num_edge_types, None, None], name='target_values')
+                tf.float32, [None, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
                 tf.float32, [self.num_edge_types, None], name='target_mask')
         else:
@@ -259,8 +264,9 @@ class ChemModel(object):
         self.ops['losses'] = []
         for (internal_id, task_id) in enumerate(self.params['task_ids']):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
+                e_ = 1 if self.args.get('--no_labels') else self.num_edge_types
 
-                output_size =  self.params['output_size']
+                output_size =  self.params['output_size'] if self.args['--pr'] != 'btb' else self.params['output_size']*e_
                 with tf.compat.v1.variable_scope("regression_gate"):
                     self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
@@ -271,7 +277,7 @@ class ChemModel(object):
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
-                # BTB [b, e * v' * v] ID [e * v * o,  b]  o is 1 for BTB
+                # BTB [b, v * e * o_] ID [e * v * o,  b]  o is 1 for BTB
                 task_target_mask = self.placeholders['target_mask'][internal_id, :]
                 # ID [b] else: [b]
                 task_target_num = tf.reduce_sum(input_tensor=task_target_mask) + SMALL_NUMBER
@@ -287,9 +293,8 @@ class ChemModel(object):
                     mask = tf.transpose(a=self.placeholders['node_mask'])  # [e * v * o,b]
                     # ID: [e * v * o,b]
                 elif self.args['--pr'] in ['btb']:
-                    labels = self.placeholders['target_values']  # [b, e, v', v]
-                    labels = tf.reshape(labels, [self.placeholders['num_graphs'], -1])  # [b, e * v' * v]
-                    mask = self.placeholders['node_mask'] #[b, e * v * v]
+                    labels = self.placeholders['target_values']  # [b, v * e * o_]
+                    mask = self.placeholders['node_mask'] #[b, v * e * o_]
                 else:
                     labels = self.placeholders['target_values'][:, internal_id, :]
                     mask = tf.transpose(a=self.placeholders['node_mask'])
@@ -318,8 +323,8 @@ class ChemModel(object):
                     new_mask = tf.cast(mask, tf.bool)
                     masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
                     task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
-                    #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
 
+                    #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
                     self.ops['accuracy_task%i' % task_id] = task_loss
                     self.ops['losses'].append(task_loss)
                     self.ops['computed_values'] = computed_values
@@ -333,8 +338,7 @@ class ChemModel(object):
 
     def reduce_edge_dimension(self, computed_values, labels, mask):
         if self.args['--pr'] in ['btb']:
-            return self.reduce_edge_dimension_btb(
-                computed_values=computed_values, labels=labels, mask=mask)
+            return computed_values, labels, mask
         else:
             return self.reduce_edge_dimension_other(
                 computed_values=computed_values, labels=labels, mask=mask)
@@ -451,7 +455,8 @@ class ChemModel(object):
         steps = 0
         acc_las, acc_uas = 0, 0
         batch_iterator = ThreadedIterator(self.make_minibatch_iterator(data, is_training), max_queue_size=5)
-        all_labels, all_computed_values, all_num_vertices, all_masks, all_ids = [], [], [], [], []
+        all_labels, all_computed_values, all_num_vertices, all_masks, all_ids, all_adj_m = \
+            [], [], [], [], [], []
 
         for step, batch_data in enumerate(batch_iterator):
             num_graphs = batch_data[self.placeholders['num_graphs']]
@@ -537,6 +542,7 @@ class ChemModel(object):
             all_num_vertices.append(num_vertices)
             all_masks.append(node_mask)
             all_ids.append(sentences_id)
+            all_adj_m.append(adjacency_matrix)
 
         # if not is_training:
         #     set_trace()
@@ -551,7 +557,9 @@ class ChemModel(object):
         #         all_labels=all_labels, all_computed_values=all_computed_values,
         #         all_num_vertices=all_num_vertices, all_masks=all_masks)
 
-        return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids
+        return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas, \
+               all_labels, all_computed_values, all_num_vertices, all_masks, \
+               all_ids, all_adj_m
 
     def train(self):
         log_to_save = []
@@ -572,7 +580,7 @@ class ChemModel(object):
             for epoch in range(1, self.params['num_epochs'] + 1):
                 print("== Epoch %i" % epoch)
                 train_loss, train_accs, train_errs, train_speed, train_steps, train_las,\
-                train_uas, train_labels, train_values, train_v, train_masks, train_ids = \
+                train_uas, train_labels, train_values, train_v, train_masks, train_ids, train_adm = \
                     self.run_epoch("epoch %i (training)" % epoch, self.train_data, True, self.train_step_id)
                 self.train_step_id += train_steps
                 accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in zip(self.params['task_ids'], train_accs)])
@@ -581,9 +589,9 @@ class ChemModel(object):
                                                                                                         accs_str,
                                                                                                         errs_str,
                                                                                                         train_speed))
-                print("Train Attachment scores - LAS : %.2f - UAS : %.2f" % (train_las, train_uas))
+                print("Train Attachment scores - LAS : %.1f%% - UAS : %.1f%%" % (train_las*100, train_uas*100))
                 valid_loss, valid_accs, valid_errs, valid_speed, valid_steps, valid_las, \
-                valid_uas, valid_labels, valid_values, valid_v, valid_masks, valid_ids = \
+                valid_uas, valid_labels, valid_values, valid_v, valid_masks, valid_ids, valid_adm = \
                     self.run_epoch("epoch %i (validation)" % epoch, self.valid_data, False, self.valid_step_id)
                 self.valid_step_id += valid_steps
 
@@ -593,7 +601,7 @@ class ChemModel(object):
                                                                                                         accs_str,
                                                                                                         errs_str,
                                                                                                         valid_speed))
-                print("Valid Attachment scores - LAS : %.2f - UAS : %.2f" % (valid_las, valid_uas))
+                print("Valid Attachment scores - LAS : %.1f%% - UAS : %.1f%%" % (valid_las*100, valid_uas*100))
                 epoch_time = time.time() - total_time_start
                 log_entry = {
                     'epoch': epoch,
@@ -622,17 +630,23 @@ class ChemModel(object):
 
                     self.save_results(
                         labels=valid_labels, values=valid_values, num_vertices=valid_v,
-                        masks=valid_masks, ids=valid_ids)
+                        masks=valid_masks, ids=valid_ids, adm=valid_adm, train=False)
+
+                    self.save_results(
+                        labels=train_labels, values=train_values, num_vertices=train_v,
+                        masks=train_masks, ids=train_ids, adm=train_adm, train=True)
+
                 elif epoch - best_val_acc_epoch >= self.params['patience']:
                     print("Stopping training after %i epochs without improvement on validation accuracy." % self.params['patience'])
                     break
 
-    def save_results(self, labels, values, num_vertices, masks, ids):
-        with open(self.valid_results_file, 'w') as out_file:
+    def save_results(self, labels, values, num_vertices, masks, ids, adm, train=False):
+        file_to_write = self.train_results_file if train else self.valid_results_file
+        with open(file_to_write, 'w') as out_file:
             self.print_all_results_as_graph(
                 all_labels=labels, all_computed_values=values,
                 all_num_vertices=num_vertices, all_masks=masks,
-                all_ids=ids, out_file=out_file)
+                all_ids=ids, all_adms=adm, out_file=out_file)
 
     def save_progress(self, model_path: str, train_step: int, valid_step: int) -> None:
         weights_to_save = {}

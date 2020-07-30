@@ -112,18 +112,29 @@ class ChemTests(unittest.TestCase):
         model = chem_tfd.DenseGGNNChemModel(args)
         model.num_edge_types = 2
         model.params = {}
-        model.params['output_size'] = 1
+        model.params['output_size'] = 4
         chosen_bucket_size = 3
         n_active_nodes = 2
 
         result = model.get_mask(n_active_nodes, chosen_bucket_size)
         expected = np.array(
-            [[1., 1., 0.],
-            [1., 1., 0.],
-            [0., 0., 0.],
-            [1., 1., 0.],
-            [1., 1., 0.],
-            [0., 0., 0.]])
+            [1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 0.,
+             0., 0., 0., 0., 0., 0., 0.])
+
+        self.assertTrue((expected == result).all())
+
+    def test_get_mask__btb__no_labels(self):
+        args = {'--pr': 'btb', '--no_labels': True, 'dummy': True}
+        model = chem_tfd.DenseGGNNChemModel(args)
+        model.num_edge_types = 2
+        model.params = {}
+        model.params['output_size'] = 4
+        chosen_bucket_size = 3
+        n_active_nodes = 2
+
+        result = model.get_mask(n_active_nodes, chosen_bucket_size)
+        expected = np.array(
+            [1., 1., 0., 0., 1., 1., 0., 0., 0., 0., 0., 0.])
 
         self.assertTrue((expected == result).all())
 
