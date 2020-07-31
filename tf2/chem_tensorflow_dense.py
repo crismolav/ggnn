@@ -350,7 +350,7 @@ class DenseGGNNChemModel(ChemModel):
     # ----- Data preprocessing and chunking into minibatches:
     def process_raw_graphs(self, raw_data: Sequence[Any], is_training_data: bool, bucket_sizes=None) -> Any:
         if bucket_sizes is None:
-            bucket_sizes = np.array(list(range(4, 200, 2)))
+            bucket_sizes = self.get_bucket_sizes()
         bucketed = defaultdict(list)
         # x_dim = self.annotation_size
         # x_dim = len(raw_data[0]["node_features"][0])
@@ -403,6 +403,9 @@ class DenseGGNNChemModel(ChemModel):
 
         return (bucketed, bucket_sizes, bucket_at_step)
 
+    def get_bucket_sizes(self):
+        return np.array(list(range(4, 200, 2)))
+
     def vectorize_node_features(self, node_features, v):
         if self.args['--pr'] in ['btb']:
             vectorized_list = []
@@ -410,7 +413,7 @@ class DenseGGNNChemModel(ChemModel):
                 #First we add the index of the node in the graph
                 index_vector = [0] * v
                 index_vector[i] = 1
-                index_vector = np.pad(index_vector, pad_width=[0, self.max_nodes - v])
+                index_vector = np.pad(index_vector, pad_width=[0, self.bucket_max_nodes - v])
 
                 #Second we add the POS of each node
                 pos_vector = self.get_pos_vector(node_feature=node_feature)

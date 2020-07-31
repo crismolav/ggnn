@@ -147,6 +147,10 @@ class ChemModel(object):
         self.annotation_size = 0
         self.dep_list, self.pos_list, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
+        bucket_sizes = self.get_bucket_sizes()
+        bucket_max_nodes_index = np.argmax(bucket_sizes > self.max_nodes)
+        self.bucket_max_nodes = bucket_sizes[bucket_max_nodes_index]
+
         self.dep_list_out, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='nivre')
 
