@@ -434,8 +434,9 @@ class DenseGGNNChemModel(ChemModel):
         else:
             return node_features
 
-    def get_pos_vector(self, node_feature):
-        # return []
+    def get_pos_vector(self, node_feature, deactivate_pos=True):
+        if deactivate_pos:
+            return []
         node_vector = [0] * (self.pos_size)
         node_vector[node_feature] = 1
 
