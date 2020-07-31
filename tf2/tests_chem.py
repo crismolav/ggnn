@@ -138,6 +138,15 @@ class ChemTests(unittest.TestCase):
 
         self.assertTrue((expected == result).all())
 
+    def test_get_pos_vector__general(self):
+        args = {'--pr': 'btb', '--no_labels': True, 'dummy': True}
+        model = chem_tfd.DenseGGNNChemModel(args)
+        model.pos_size = 4
+        result = model.get_pos_vector(node_feature=2)
+        expected = [0, 0, 1, 0]
+
+        self.assertTrue(expected, result)
+
 if __name__ == "__main__":
     unittest.main()
     '''

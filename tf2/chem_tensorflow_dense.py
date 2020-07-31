@@ -365,6 +365,7 @@ class DenseGGNNChemModel(ChemModel):
             node_features_vector = self.vectorize_node_features(
                 node_features=d["node_features"], v=chosen_bucket_size)
             x_dim = len(node_features_vector[0])
+
             bucketed_dict = {
                 'adj_mat':  graph_to_adj_mat_dir(d['graph'], chosen_bucket_size, self.num_edge_types),
                 #[e, v', v]
@@ -406,8 +407,16 @@ class DenseGGNNChemModel(ChemModel):
         if self.args['--pr'] in ['btb']:
             vectorized_list = []
             for i, node_feature in enumerate(node_features):
-                node_vector = [0] * v
-                node_vector[i] = 1
+                #First we add the index of the node in the graph
+                index_vector = [0] * v
+                index_vector[i] = 1
+                index_vector = np.pad(index_vector, pad_width=[0, self.max_nodes - v])
+
+                #Second we add the POS of each node
+                pos_vector = self.get_pos_vector(node_feature=node_feature)
+
+
+                node_vector = np.append(index_vector, pos_vector)
                 vectorized_list.append(node_vector)
 
             return vectorized_list
@@ -421,6 +430,13 @@ class DenseGGNNChemModel(ChemModel):
         #     return vectorized_list
         else:
             return node_features
+
+    def get_pos_vector(self, node_feature):
+        # return []
+        node_vector = [0] * (self.pos_size)
+        node_vector[node_feature] = 1
+
+        return node_vector
 
     def get_mask(self, n_active_nodes, chosen_bucket_size):
         #TODO:test
@@ -491,9 +507,10 @@ class DenseGGNNChemModel(ChemModel):
                 annotations=annotations, max_n_vertices=chosen_bucket_size,
                 num_edge_types=self.num_edge_types, adj_mat=adj_mat, sentences_id=sentences_id)
         elif self.args['--pr'] in ['btb']:
+            current_size= len(annotations[0][0])
             return np.pad(annotations,
                           pad_width=[[0, 0], [0, 0],
-                                     [0, self.params['hidden_size'] - chosen_bucket_size]],
+                                     [0, self.params['hidden_size'] - current_size]],
                           mode='constant')
         else:
             return np.pad(annotations,

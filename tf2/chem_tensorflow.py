@@ -145,9 +145,9 @@ class ChemModel(object):
         self.max_num_vertices = 0
         self.num_edge_types = 0
         self.annotation_size = 0
-        self.dep_list, self.pos_list = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list, self.pos_list, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
-        self.dep_list_out, _ = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list_out, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='nivre')
 
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
@@ -210,6 +210,7 @@ class ChemModel(object):
         self.num_edge_types = max([len(self.dep_list), self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2)])
 
         self.annotation_size = self.get_annotation_size(data=data)
+        self.pos_size = len(self.pos_list)
 
         return self.process_raw_graphs(data, is_training_data)
 

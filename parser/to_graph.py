@@ -72,6 +72,10 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
 
     return sentence_dict
 
+def get_node_pos_list(pos_list, sentence_pos_list):
+    pos_list = [0] + [pos_list.index(x) for x in sentence_pos_list]
+
+    return  pos_list
 def get_random_node(sentence_list):
     random.seed(0)
     random_line = random.choice(sentence_list)
@@ -193,15 +197,19 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                       'en-wsj-std-test-stanford-3.3.0-tagged.conll']
     dep_set = set()
     pos_set = set()
-
+    max_nodes = 0
     for file_name in file_names:
         count = 0
         file_path = get_file_path(file_name=file_name)
         with open(file_path, 'r') as input_file:
             lines = input_file.readlines()
+            last_line = None
             for i, line in enumerate(lines):
                 if line.strip() == '':
                     count += 1
+                    nodes_number = int(last_line[0]) + 1
+                    if nodes_number > max_nodes:
+                        max_nodes = nodes_number
                     if sample_size is not None and count == sample_size:
                         break
                     continue
@@ -210,6 +218,7 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                 dep = line_as_list[7].strip()
                 pos_set.add(pos)
                 dep_set.add(dep)
+                last_line = line_as_list
 
     dep_list = list(dep_set)
     pos_list = list(pos_set)
@@ -217,7 +226,7 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
     pos_list.sort()
     pos_list = ['zero'] + pos_list
 
-    return dep_list, pos_list
+    return dep_list, pos_list, max_nodes
 
 def main():
     problem = sys.argv[1]
@@ -233,8 +242,8 @@ def main():
 
         count = 0
 
-        dep_list_in, pos_list = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
-        dep_list_out, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
+        dep_list_in, pos_list, _ = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
+        dep_list_out, _, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
 
         with open(file_path_in, 'r') as input_file_in:
             with open(file_path_out, 'r') as input_file_out:
@@ -279,7 +288,7 @@ def main():
 
         count = 0
         bank_type = 'nivre' if 'nivre' in file_name else 'std'
-        dep_list, pos_list = get_dep_and_pos_list(bank_type=bank_type)
+        dep_list, pos_list, _ = get_dep_and_pos_list(bank_type=bank_type)
 
         with open(file_path, 'r') as input_file:
             with open(new_file_path, 'w') as output_file:
