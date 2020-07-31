@@ -169,10 +169,12 @@ def get_file_path(file_name):
 
 def get_dep_list(bank_type):
     if bank_type == 'nivre':
-        file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll']
+        file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll',
+                      'en-wsj-ym-nivre-train.conll']
     else:
         file_names = ['en-wsj-std-dev-stanford-3.3.0-tagged.conll',
-                      'en-wsj-std-test-stanford-3.3.0-tagged.conll']
+                      'en-wsj-std-test-stanford-3.3.0-tagged.conll',
+                      'en-wsj-std-train-stanford-3.3.0.conll']
     dep_set = set()
     for file_name in file_names:
         file_path = get_file_path(file_name=file_name)
@@ -191,10 +193,12 @@ def get_dep_list(bank_type):
 
 def get_dep_and_pos_list(bank_type, sample_size=None):
     if bank_type == 'nivre':
-        file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll']
+        file_names = ['en-wsj-ym-nivre-dev.conll', 'en-wsj-ym-nivre-test.conll',
+                      'en-wsj-ym-nivre-train.conll']
     else:
         file_names = ['en-wsj-std-dev-stanford-3.3.0-tagged.conll',
-                      'en-wsj-std-test-stanford-3.3.0-tagged.conll']
+                      'en-wsj-std-test-stanford-3.3.0-tagged.conll',
+                      'en-wsj-std-train-stanford-3.3.0.conll']
     dep_set = set()
     pos_set = set()
     max_nodes = 0

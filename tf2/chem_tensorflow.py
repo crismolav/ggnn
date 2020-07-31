@@ -33,8 +33,8 @@ def get_train_and_validation_files(args):
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'btb':
-        train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json'
-        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json' if not args.get('--test_with_train') else train_file
+        train_file = 'en-wsj-std-train-stanford-3.3.0_btb.json'
+        valid_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
