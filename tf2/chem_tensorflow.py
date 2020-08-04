@@ -149,6 +149,12 @@ class ChemModel(object):
         self.max_num_vertices = 0
         self.num_edge_types = 0
         self.annotation_size = 0
+        # embedding sizes
+        self.pos_embedding_size = 50
+        self.loc_embedding_size = 80
+        self.word_embedding_size = 100
+
+
         self.dep_list, self.pos_list, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
         bucket_sizes = self.get_bucket_sizes()
@@ -482,7 +488,7 @@ class ChemModel(object):
                           self.ops['m'], self.placeholders['adjacency_matrix'],
                           self.ops['edge_weights'], self.ops['h'], self.ops['h_gru'],
                           self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
-                          self.ops['_am'], self.placeholders['sentences_id'],
+                          self.ops['_am'], self.placeholders['sentences_id'], self.ops['word_inputs']
                           ]
             if is_training:
                 #TODO: change this back to normal
@@ -515,8 +521,9 @@ class ChemModel(object):
             h_gru = result[18]
             edge_weight_dkp = result[19]
             m1 = result[20]
-            # _am = result[23]
+            # _am = result[21]
             sentences_id = result[22]
+            word_inputs = result[23]
             loss_ = result[0]
 
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))

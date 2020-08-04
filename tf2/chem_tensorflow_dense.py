@@ -154,6 +154,9 @@ class DenseGGNNChemModel(ChemModel):
             tf.float32, [None, None], name='softmax_mask')
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
+        self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
+            tf.int32, [None, None, 2], name='word_inputs')
+        # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
             tf.float32, [None, self.num_edge_types, None, None], name='adjacency_matrix')
         # [b, e, v', v]
@@ -163,18 +166,42 @@ class DenseGGNNChemModel(ChemModel):
         self.weights['edge_weights'] = tf.Variable(glorot_init([self.num_edge_types, h_dim, h_dim]))
         if self.params['use_edge_bias']:
             self.weights['edge_biases'] = tf.Variable(np.zeros([self.num_edge_types, 1, h_dim]).astype(np.float32))
+        self.weights['loc_embeddings'] = tf.compat.v1.get_variable(
+            'loc_embeddings', [self.max_nodes, self.loc_embedding_size],
+            dtype=tf.float32)
+        self.weights['pos_embeddings'] = tf.compat.v1.get_variable(
+            'pos_embedding', [self.pos_size, self.pos_embedding_size],
+            dtype=tf.float32)
+
         with tf.compat.v1.variable_scope("gru_scope"):
             cell = tf.compat.v1.nn.rnn_cell.GRUCell(h_dim)
             cell = tf.compat.v1.nn.rnn_cell.DropoutWrapper(cell,
                                                  state_keep_prob=self.placeholders['graph_state_keep_prob'])
             self.weights['node_gru'] = cell
 
+
     def compute_final_node_representations(self) -> tf.Tensor:
         v = self.placeholders['num_vertices']
         e = self.num_edge_types
         h_dim = self.params['hidden_size']
-        h = self.placeholders['initial_node_representation']
+        p_em = self.pos_embedding_size
+        l_em = self.loc_embedding_size
+        # h = self.placeholders['initial_node_representation']
         # BTB: [b * v, h] ID: [e, b, v, h] else : [b, v, h]    v' main dimension
+        word_inputs = self.placeholders['word_inputs'] # [b, v, 2]
+        loc_inputs = tf.nn.embedding_lookup(
+            self.weights['loc_embeddings'], word_inputs[:, :, 0])
+        # BTB: [b, v, l_em]
+        pos_inputs = tf.nn.embedding_lookup(
+            self.weights['pos_embeddings'], word_inputs[:, :, 1])
+        # BTB: [b, v, p_em]
+        word_inputs = tf.concat([loc_inputs, pos_inputs], 2)
+        # BTB: [b, v, l_em + p_em]
+        word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - (p_em+l_em)]])
+        # BTB: [b, v, h]
+        h = word_inputs
+        self.ops['word_inputs'] = word_inputs
+
         h = tf.reshape(h, [-1, h_dim])
         # BTB: [b * v, h] ID: [e * b * v, h] else : [b * v, h]
 
@@ -380,11 +407,9 @@ class DenseGGNNChemModel(ChemModel):
                 # 'softmax_mask' : self.get_mask_sm(n_active_nodes=n_active_nodes, chosen_bucket_size=chosen_bucket_size),
                 'raw_sentence': d['raw_sentence'] if 'raw_sentence' in d else None,
                 'id' : d['id'] if 'id' in d else None,
-                'adj_mat_annotations' : get_adj_mat_with_annotations(
-                    graph=d['graph'], node_features=d["node_features"],  max_n_vertices=chosen_bucket_size,
-                    num_edge_types=self.num_edge_types, annotation_size=self.annotation_size)
+                'words_pos': d["node_features"],
+                'words_loc': [x for x in range(n_active_nodes)]
             }
-
             bucketed[chosen_bucket_idx].append(bucketed_dict)
 
 
@@ -412,6 +437,8 @@ class DenseGGNNChemModel(ChemModel):
         if self.args['--pr'] in ['btb']:
             vectorized_list = []
             graph_ = [[0, 0, 0]] + graph
+            # pos_input = tf.nn.embedding_lookup(self.weights['pos_embeddings'], node_features)
+            # set_trace()
             for i, node_feature in enumerate(node_features):
                 #First we add the index of the node in the graph
                 index_vector = [0] * v
@@ -419,6 +446,7 @@ class DenseGGNNChemModel(ChemModel):
                 index_vector = np.pad(index_vector, pad_width=[0, self.bucket_max_nodes - v])
 
                 #Second we add the POS of each node
+
                 pos_vector = self.get_pos_vector(node_feature=node_feature)
                 # third we add the dep vector of each node
                 node_edge = graph_[i]
@@ -439,13 +467,15 @@ class DenseGGNNChemModel(ChemModel):
             return node_features
 
     def get_pos_vector(self, node_feature, deactivate_pos=False):
+        # word_inputs = tf.nn.embedding_lookup(self.pos_embeddings, inputs[:, :, 0])
         if deactivate_pos:
             return []
         node_vector = [0] * (self.pos_size)
         node_vector[node_feature] = 1
 
         return node_vector
-    def get_dep_vector(self, node_edge, deactivate_pos=False):
+
+    def get_dep_vector(self, node_edge, deactivate_pos=True):
         dep_index = node_edge[1]
         if deactivate_pos:
             return []
@@ -518,7 +548,7 @@ class DenseGGNNChemModel(ChemModel):
             n_active_nodes = n_active_nodes-1
             return [data_dict["targets"][task_id] + [0 for _ in range(chosen_bucket_size - n_active_nodes)] for task_id in self.params['task_ids']]
     def pad_annotations(self, annotations, chosen_bucket_size, adj_mat=None, sentences_id=None,
-                        adj_mat_annotations=None):
+                        words_pos=None):
         if  self.args['--pr'] in ['identity']:
             return self.annotations_padded_and_expanded(
                 annotations=annotations, max_n_vertices=chosen_bucket_size,
@@ -557,7 +587,7 @@ class DenseGGNNChemModel(ChemModel):
     def make_batch(self, elements):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
                       'task_masks': [], 'sentences_id': [],
-                      'adj_mat_annotations':[]}
+                      'words_pos':[], 'words_loc':[]}
         for d in elements:
             dd = d
             batch_data['adj_mat'].append(d['adj_mat'])
@@ -565,8 +595,8 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['node_mask'].append(d['mask'])
             # batch_data['softmax_mask'].append(d['softmax_mask'])
             batch_data['sentences_id'].append(d['id'])
-            batch_data['adj_mat_annotations'].append(d['adj_mat_annotations'])
-
+            batch_data['words_pos'].append(d['words_pos'])
+            batch_data['words_loc'].append(d['words_loc'])
             target_task_values = []
             target_task_mask = []
             for target_val in d['labels']: # else: [1]
@@ -628,13 +658,22 @@ class DenseGGNNChemModel(ChemModel):
             initial_representations = self.pad_annotations(
                 initial_representations, chosen_bucket_size=bucket_sizes[bucket],
                 adj_mat=batch_data['adj_mat'], sentences_id=batch_data['sentences_id'],
-                adj_mat_annotations=batch_data['adj_mat_annotations'])
+                words_pos=batch_data['words_pos'])
             #ID: [e, b, v, h] else [b, v, h]
 
             target_values = self.get_target_values_formatted(labels=batch_data['labels'])
             # BTB [b, v * e * o_] ID: [o, v, e, b]
+            pos_inputs = self.get_word_inputs_padded(
+                words_pos=batch_data['words_pos'], b=num_graphs, v=bucket_sizes[bucket])
+            # [b, v]
+            loc_inputs = self.get_word_inputs_padded(
+                words_pos=batch_data['words_loc'], b=num_graphs, v=bucket_sizes[bucket])
+            # [b, v]
+            word_inputs = np.stack((loc_inputs, pos_inputs), axis=2)
+            # [b, v, 2]
             batch_feed_dict = {
                 self.placeholders['initial_node_representation']: initial_representations,
+                # ID: [e, b, v, h] else [b, v, h]
                 self.placeholders['target_values']: target_values,
                 #BTB [b, v * e * o_]  ID: [o, v, e, b] head [v, 1, b]
                 self.placeholders['target_mask']: np.transpose(batch_data['task_masks'], axes=[1, 0]),
@@ -647,14 +686,22 @@ class DenseGGNNChemModel(ChemModel):
                 # BTB [b, v * e * o_] ID [b, e * v * o]
                 self.placeholders['graph_state_keep_prob']: dropout_keep_prob,
                 self.placeholders['edge_weight_dropout_keep_prob']: dropout_keep_prob,
-                self.placeholders['sentences_id']: batch_data['sentences_id']
+                self.placeholders['sentences_id']: batch_data['sentences_id'],
+                self.placeholders['word_inputs']: word_inputs
+                # [b, v, 2]
             }
-
             bucket_counters[bucket] += 1
             iteration = step
             avg_num += num_graphs
 
             yield batch_feed_dict
+
+    def get_word_inputs_padded(self, words_pos, b, v):
+        pos_inputs = np.zeros([b, v])
+        for i, pos_list in enumerate(words_pos):
+            pos_inputs[i][0:len(pos_list)] = pos_list
+
+        return pos_inputs
 
     def get_target_values_formatted(self, labels):
         if self.args['--pr'] in ['btb']:
