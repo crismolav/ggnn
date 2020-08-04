@@ -33,8 +33,12 @@ def get_train_and_validation_files(args):
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'btb':
-        train_file = 'en-wsj-std-train-stanford-3.3.0_btb.json'
-        valid_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json' if not args.get('--test_with_train') else train_file
+        # train_file = 'en-wsj-std-train-stanford-3.3.0_btb.json'
+        # valid_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json' if not args.get('--test_with_train') else train_file
+
+        train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json'
+        valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json' if not args.get(
+            '--test_with_train') else train_file
 
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
@@ -64,7 +68,7 @@ class ChemModel(object):
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
-            'out_layer_dropout_keep_prob': 1.0,
+            'out_layer_dropout_keep_prob': 0.95,
 
             'hidden_size': 400 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
@@ -325,18 +329,19 @@ class ChemModel(object):
                     if self.args.get('--no_labels'):
                         computed_values, labels, mask = self.reduce_edge_dimension(
                             computed_values=computed_values, labels=labels, mask=mask)
-                    new_mask = tf.cast(mask, tf.bool)
-                    masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
-                    task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
 
-                    #task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.log(computed_values), axis = 1))/task_target_num
+                    if self.args['--pr'] == 'btb':
+                        task_loss = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
+                    else:
+                        new_mask = tf.cast(mask, tf.bool)
+                        masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
+                        task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
+
                     self.ops['accuracy_task%i' % task_id] = task_loss
                     self.ops['losses'].append(task_loss)
                     self.ops['computed_values'] = computed_values
                     self.ops['labels'] = labels
-                    self.ops['node_mask'] = tf.transpose(mask)
-                    self.ops['masked_loss'] = masked_loss
-                    self.ops['new_mask'] =  new_mask
+                    self.ops['node_mask'] = tf.transpose(mask) if self.args['--pr'] != 'btb' else mask
                     self.ops['task_target_mask'] = task_target_mask
 
         self.ops['loss'] = tf.reduce_sum(input_tensor=self.ops['losses'])
@@ -470,7 +475,6 @@ class ChemModel(object):
                           self.ops['labels'], self.ops['computed_values'],
                           self.ops['final_node_representations'],
                           self.ops['node_mask'], self.ops['losses'],
-                          self.ops['masked_loss'], self.ops['new_mask'],
                           self.placeholders['initial_node_representation'],
                           self.weights['edge_weights'], self.weights['edge_biases'],
                           self.weights['regression_transform_task%i' % 0].params['weights'],
@@ -497,23 +501,22 @@ class ChemModel(object):
             computed_values = result[4]
             final_node_representations = result[5]
             node_mask = result[6]
-            initial_node_representation = result[10]
-            edge_weights = result[11]
-            edge_biases = result[12]
-            regression_transform_task = result[13]
-            num_vertices = result[14]
-            acts = result[15]
-            mm = result[16]
-            adjacency_matrix = result[17]
-            edge_weights_ops = result[18]
-            hh = result[19]
-            h_gru = result[20]
-            edge_weight_dkp = result[21]
-            m1 = result[22]
+
+            initial_node_representation = result[8]
+            edge_weights = result[9]
+            edge_biases = result[10]
+            regression_transform_task = result[11]
+            num_vertices = result[12]
+            acts = result[13]
+            mm = result[14]
+            adjacency_matrix = result[15]
+            edge_weights_ops = result[16]
+            hh = result[17]
+            h_gru = result[18]
+            edge_weight_dkp = result[19]
+            m1 = result[20]
             # _am = result[23]
-            sentences_id = result[24]
-
-
+            sentences_id = result[22]
             loss_ = result[0]
 
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))

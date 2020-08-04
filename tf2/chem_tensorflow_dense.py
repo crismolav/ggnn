@@ -76,7 +76,7 @@ def target_to_adj_mat(target, max_n_vertices, num_edge_types, output_size, tie_f
         amat[e-1, i+1, src] = 1
 
         # amat[e-1 + bwd_edge_offset, src] = 1
-    # [e, v', o]
+    #[e, v', o]
     return amat
 
 def adj_mat_to_target(adj_mat, is_probability=False, true_target=None):
@@ -336,6 +336,7 @@ class DenseGGNNChemModel(ChemModel):
             softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, e * o_]
             softmax = tf.reshape(softmax, [b, v * e_ * output_n]) # [b, v * e * o_]
             self.output = softmax
+
         else:
             gated_outputs = tf.reshape(gated_outputs, [-1, v])  # [b, v]
             #TODO change this
@@ -363,7 +364,7 @@ class DenseGGNNChemModel(ChemModel):
             n_active_nodes = len(d["node_features"])
             chosen_bucket_size = bucket_sizes[chosen_bucket_idx]
             node_features_vector = self.vectorize_node_features(
-                node_features=d["node_features"], v=chosen_bucket_size)
+                node_features=d["node_features"], v=chosen_bucket_size , graph=d['graph'])
             x_dim = len(node_features_vector[0])
 
             bucketed_dict = {
@@ -383,6 +384,7 @@ class DenseGGNNChemModel(ChemModel):
                     graph=d['graph'], node_features=d["node_features"],  max_n_vertices=chosen_bucket_size,
                     num_edge_types=self.num_edge_types, annotation_size=self.annotation_size)
             }
+
             bucketed[chosen_bucket_idx].append(bucketed_dict)
 
 
@@ -406,9 +408,10 @@ class DenseGGNNChemModel(ChemModel):
     def get_bucket_sizes(self):
         return np.array(list(range(4, 200, 2)))
 
-    def vectorize_node_features(self, node_features, v):
+    def vectorize_node_features(self, node_features, v, graph):
         if self.args['--pr'] in ['btb']:
             vectorized_list = []
+            graph_ = [[0, 0, 0]] + graph
             for i, node_feature in enumerate(node_features):
                 #First we add the index of the node in the graph
                 index_vector = [0] * v
@@ -417,9 +420,10 @@ class DenseGGNNChemModel(ChemModel):
 
                 #Second we add the POS of each node
                 pos_vector = self.get_pos_vector(node_feature=node_feature)
-
-
-                node_vector = np.append(index_vector, pos_vector)
+                # third we add the dep vector of each node
+                node_edge = graph_[i]
+                dep_vector = self.get_dep_vector(node_edge=node_edge)
+                node_vector = np.hstack((index_vector, pos_vector, dep_vector )).ravel()
                 vectorized_list.append(node_vector)
 
             return vectorized_list
@@ -439,6 +443,15 @@ class DenseGGNNChemModel(ChemModel):
             return []
         node_vector = [0] * (self.pos_size)
         node_vector[node_feature] = 1
+
+        return node_vector
+    def get_dep_vector(self, node_edge, deactivate_pos=False):
+        dep_index = node_edge[1]
+        if deactivate_pos:
+            return []
+        #in here we are arbitrarly saying that index 0 is the dep of node zero.
+        node_vector = [0] * ((self.num_edge_types)+1)
+        node_vector[dep_index] = 1
 
         return node_vector
 
@@ -617,6 +630,7 @@ class DenseGGNNChemModel(ChemModel):
                 adj_mat=batch_data['adj_mat'], sentences_id=batch_data['sentences_id'],
                 adj_mat_annotations=batch_data['adj_mat_annotations'])
             #ID: [e, b, v, h] else [b, v, h]
+
             target_values = self.get_target_values_formatted(labels=batch_data['labels'])
             # BTB [b, v * e * o_] ID: [o, v, e, b]
             batch_feed_dict = {
@@ -836,7 +850,7 @@ class DenseGGNNChemModel(ChemModel):
             e_ = 1 if self.args.get('--no_labels') else e
             o_ = self.params['output_size']
 
-            mask_reshaped = np.transpose(mask)  # [b, v * e * o_]
+            mask_reshaped = mask  # [b, v * e * o_]
             results_masked = np.multiply(computed_values, mask_reshaped) # [b, v * e * o_]
             results_reshaped = np.reshape(results_masked, [-1, e_, v, o_]) # [b, e, v', o]
 
