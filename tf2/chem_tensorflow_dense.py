@@ -127,8 +127,9 @@ class DenseGGNNChemModel(ChemModel):
     # @classmethod
     def default_params(self):
         params = dict(super().default_params())
+        # graph_state_dropout_keep_prob is used for feeding edge_weight_dropout_keep_prob
         params.update({
-                        'graph_state_dropout_keep_prob': 1.,
+                        'graph_state_dropout_keep_prob': 0.9,
                         'task_sample_ratios': {},
                         'use_edge_bias': True,
                         'edge_weight_dropout_keep_prob': 1
@@ -140,6 +141,8 @@ class DenseGGNNChemModel(ChemModel):
         # inputs
         self.placeholders['graph_state_keep_prob'] = tf.compat.v1.placeholder(tf.float32, None, name='graph_state_keep_prob')
         self.placeholders['edge_weight_dropout_keep_prob'] = tf.compat.v1.placeholder(tf.float32, None, name='edge_weight_dropout_keep_prob')
+        self.placeholders['emb_dropout_keep_prob'] = tf.compat.v1.placeholder(tf.float32, [],
+                                                                              name='emb_dropout_keep_prob')
         #TODO: change this
         if self.args['--pr'] in ['identity']:
             self.placeholders['initial_node_representation'] = tf.compat.v1.placeholder(
@@ -179,6 +182,24 @@ class DenseGGNNChemModel(ChemModel):
                                                  state_keep_prob=self.placeholders['graph_state_keep_prob'])
             self.weights['node_gru'] = cell
 
+    def get_initial_node_representation(self, h_dim, p_em, l_em):
+        if self.args['--pr'] in ['btb']:
+            word_inputs = self.placeholders['word_inputs']  # [b, v, 2]
+            loc_inputs = tf.nn.embedding_lookup(
+                self.weights['loc_embeddings'], word_inputs[:, :, 0])
+            loc_inputs = tf.nn.dropout(loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob'])) # we use placeholders so that it can change when it's validation
+            # BTB: [b, v, l_em]
+            pos_inputs = tf.nn.embedding_lookup(
+                self.weights['pos_embeddings'], word_inputs[:, :, 1])
+            pos_inputs = tf.nn.dropout(pos_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            # BTB: [b, v, p_em]
+            word_inputs = tf.concat([loc_inputs, pos_inputs], 2)
+            # BTB: [b, v, l_em + p_em]
+            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - (p_em + l_em)]])
+            # BTB: [b, v, h]
+            return word_inputs
+        else:
+            return self.placeholders['initial_node_representation']
 
     def compute_final_node_representations(self) -> tf.Tensor:
         v = self.placeholders['num_vertices']
@@ -186,21 +207,9 @@ class DenseGGNNChemModel(ChemModel):
         h_dim = self.params['hidden_size']
         p_em = self.pos_embedding_size
         l_em = self.loc_embedding_size
-        # h = self.placeholders['initial_node_representation']
+        h = self.get_initial_node_representation(h_dim, p_em, l_em)
         # BTB: [b * v, h] ID: [e, b, v, h] else : [b, v, h]    v' main dimension
-        word_inputs = self.placeholders['word_inputs'] # [b, v, 2]
-        loc_inputs = tf.nn.embedding_lookup(
-            self.weights['loc_embeddings'], word_inputs[:, :, 0])
-        # BTB: [b, v, l_em]
-        pos_inputs = tf.nn.embedding_lookup(
-            self.weights['pos_embeddings'], word_inputs[:, :, 1])
-        # BTB: [b, v, p_em]
-        word_inputs = tf.concat([loc_inputs, pos_inputs], 2)
-        # BTB: [b, v, l_em + p_em]
-        word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - (p_em+l_em)]])
-        # BTB: [b, v, h]
-        h = word_inputs
-        self.ops['word_inputs'] = word_inputs
+        self.ops['word_inputs'] = h
 
         h = tf.reshape(h, [-1, h_dim])
         # BTB: [b * v, h] ID: [e * b * v, h] else : [b * v, h]
@@ -312,7 +321,16 @@ class DenseGGNNChemModel(ChemModel):
 
     def gated_regression(self, last_h, regression_gate, regression_transform):
         # last_h ID [e, b, v, h] else [b, v, h]
-        gate_input = tf.concat([last_h, self.placeholders['initial_node_representation']], axis = -1)
+        b = self.placeholders['num_graphs']
+        e = self.num_edge_types
+        v = self.placeholders['num_vertices']
+        output_n = self.params['output_size']
+        h_dim = self.params['hidden_size']
+        p_em = self.pos_embedding_size
+        l_em = self.loc_embedding_size
+
+        initial_node_representation = self.get_initial_node_representation(h_dim, p_em, l_em)
+        gate_input = tf.concat([last_h, initial_node_representation], axis = -1)
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
@@ -320,10 +338,7 @@ class DenseGGNNChemModel(ChemModel):
         # ID [e * b * v, h] else [b * v, h]
         gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
         # BTB [b * v, e * o_] ID [e * b * v, o] else [b * v, 1]
-        b = self.placeholders['num_graphs']
-        e = self.num_edge_types
-        v = self.placeholders['num_vertices']
-        output_n = self.params['output_size']
+
         node_mask = self.placeholders['node_mask']
         # BTB: #[b, v * e * o_] ID [b, e * v * o]
         softmax_mask = self.placeholders['softmax_mask'] # ID [b, e * v * o]
@@ -644,6 +659,7 @@ class DenseGGNNChemModel(ChemModel):
 
         bucket_counters = defaultdict(int)
         dropout_keep_prob = self.params['graph_state_dropout_keep_prob'] if is_training else 1.
+        emb_dropout_keep_prob = self.params['emb_dropout_keep_prob'] if is_training else 1.
         avg_num = 0
         for step in range(len(bucket_at_step)):
             bucket = bucket_at_step[step]
@@ -686,6 +702,7 @@ class DenseGGNNChemModel(ChemModel):
                 # BTB [b, v * e * o_] ID [b, e * v * o]
                 self.placeholders['graph_state_keep_prob']: dropout_keep_prob,
                 self.placeholders['edge_weight_dropout_keep_prob']: dropout_keep_prob,
+                self.placeholders['emb_dropout_keep_prob']: emb_dropout_keep_prob,
                 self.placeholders['sentences_id']: batch_data['sentences_id'],
                 self.placeholders['word_inputs']: word_inputs
                 # [b, v, 2]
