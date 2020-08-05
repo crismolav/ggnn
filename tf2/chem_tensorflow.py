@@ -33,6 +33,7 @@ def get_train_and_validation_files(args):
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'btb':
+
         if args.get('--train_with_dev'):
             train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json'
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json' if not args.get(
@@ -41,7 +42,6 @@ def get_train_and_validation_files(args):
             train_file = 'en-wsj-std-train-stanford-3.3.0_btb.json'
             valid_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json' if not args.get(
                 '--test_with_train') else train_file
-
 
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
@@ -73,7 +73,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.95,
             'emb_dropout_keep_prob': 0.7,
-            'hidden_size': 400 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 600 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -150,21 +150,20 @@ class ChemModel(object):
 
         # Load data:
         self.max_num_vertices = 0
-        self.num_edge_types = 0
-        self.annotation_size = 0
+        self.num_edge_types   = 0
+        self.annotation_size  = 0
         # embedding sizes
-        self.pos_embedding_size = 50
-        self.loc_embedding_size = 80
-        self.word_embedding_size = 100
+        self.pos_embedding_size  = 50
+        self.loc_embedding_size  = 80
+        self.word_embedding_size = 150
 
-
-        self.dep_list, self.pos_list, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list, self.pos_list, _, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
         bucket_sizes = self.get_bucket_sizes()
         bucket_max_nodes_index = np.argmax(bucket_sizes > self.max_nodes)
         self.bucket_max_nodes = bucket_sizes[bucket_max_nodes_index]
 
-        self.dep_list_out, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list_out, _, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='nivre')
 
         self.train_data = self.load_data(params['train_file'], is_training_data=True)

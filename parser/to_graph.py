@@ -243,8 +243,9 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
     word_list.sort()
     pos_list = ['zero'] + pos_list
     word_list = ['zero'] + word_list
+    vocab_size = len(word_list)
 
-    return dep_list, pos_list, word_list, max_nodes
+    return dep_list, pos_list, word_list, vocab_size, max_nodes
 
 def main():
     problem = sys.argv[1]
@@ -260,8 +261,8 @@ def main():
 
         count = 0
 
-        dep_list_in, pos_list, word_list, _ = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
-        dep_list_out, _, _, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
+        dep_list_in, pos_list, word_list, _, _ = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
+        dep_list_out, _, _, _, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
 
         word_dict = {k: v for v, k in enumerate(word_list)}
 
@@ -309,7 +310,7 @@ def main():
 
         count = 0
         bank_type = 'nivre' if 'nivre' in file_name else 'std'
-        dep_list, pos_list, word_list, _ = get_dep_and_pos_list(bank_type=bank_type)
+        dep_list, pos_list, word_list, _, _ = get_dep_and_pos_list(bank_type=bank_type)
         word_dict = {k: v for v, k in enumerate(word_list)}
         with open(file_path, 'r') as input_file:
             with open(new_file_path, 'w') as output_file:
