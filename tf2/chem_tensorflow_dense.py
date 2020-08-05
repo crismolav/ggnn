@@ -22,6 +22,7 @@ Options:
     --alpha K                learning rate
     --new                    new way of calculating
     --no_labels              no labels considered
+    --train_with_dev         use dev set which is smaller for training
 """
 from __future__ import print_function
 from typing import Sequence, Any
