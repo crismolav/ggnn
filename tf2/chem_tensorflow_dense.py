@@ -1212,7 +1212,7 @@ def main():
         model.train()
     end_time = time.time()
     total_time = end_time - start_time
-    print("total time %.2f/s"%total_time)
+    print("total time %.2f s"%total_time)
     # except:
     #     typ, value, tb = sys.exc_info()
     #     traceback.print_exc()
