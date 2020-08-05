@@ -15,11 +15,13 @@ POS_list = [
 sample_dep_list = ['ROOT', 'det', 'nsubj', 'aux']
 
 def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=None,
-                     dep_list_out=None, sentence_id=None, pos_list=None):
+                     dep_list_out=None, sentence_id=None, pos_list=None, word_dict=None):
     graph = []
     target_list = []
     sentence_pos_list = []
     sentence_dict = {}
+    words_index_list = []
+
     target_id = None
     dependencies_set = set()
     selected_id = get_random_node(sentence_list)
@@ -28,7 +30,7 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
     for i, line in enumerate(sentence_list):
         line_as_list = line.split('\t')
         id = line_as_list[0]
-        label = line_as_list[1]
+        word = line_as_list[1].lower()
         pos = line_as_list[3]
         father = line_as_list[6]
         dep = line_as_list[7]
@@ -38,6 +40,9 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         new_edge = [int(father), edge_type, int(id)]
         graph.append(new_edge)
         sentence_pos_list.append(pos)
+        word_index = word_dict[word]
+        words_index_list.append(word_index)
+
         if problem == 'root' and int(father) == 0:
             target_id = int(id)
             target_list.append([target_id])
@@ -69,6 +74,8 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         sentence_pos_list=sentence_pos_list, pos_list=pos_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
     sentence_dict["id"] = str(sentence_id).zfill(5)
+    #we add the zero index to the node zero
+    sentence_dict["words_index"] = [0] + words_index_list
 
     return sentence_dict
 
@@ -201,6 +208,7 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                       'en-wsj-std-train-stanford-3.3.0.conll']
     dep_set = set()
     pos_set = set()
+    word_set = set()
     max_nodes = 0
     for file_name in file_names:
         count = 0
@@ -218,19 +226,25 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                         break
                     continue
                 line_as_list = line.split('\t')
+                word = line_as_list[1].lower()
                 pos = line_as_list[3]
                 dep = line_as_list[7].strip()
+                word_set.add(word)
                 pos_set.add(pos)
                 dep_set.add(dep)
                 last_line = line_as_list
 
+
     dep_list = list(dep_set)
     pos_list = list(pos_set)
+    word_list = list(word_set)
     dep_list.sort()
     pos_list.sort()
+    word_list.sort()
     pos_list = ['zero'] + pos_list
+    word_list = ['zero'] + word_list
 
-    return dep_list, pos_list, max_nodes
+    return dep_list, pos_list, word_list, max_nodes
 
 def main():
     problem = sys.argv[1]
@@ -246,8 +260,10 @@ def main():
 
         count = 0
 
-        dep_list_in, pos_list, _ = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
-        dep_list_out, _, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
+        dep_list_in, pos_list, word_list, _ = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
+        dep_list_out, _, _, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
+
+        word_dict = {k: v for v, k in enumerate(word_list)}
 
         with open(file_path_in, 'r') as input_file_in:
             with open(file_path_out, 'r') as input_file_out:
@@ -263,7 +279,8 @@ def main():
                             sentence_dict = process_sentence(
                                 sentence_list=new_sentence_list_in, problem=problem,
                                 dep_list=dep_list_in, sentence_list_out=new_sentence_list_out,
-                                dep_list_out=dep_list_out, sentence_id=count, pos_list=pos_list)
+                                dep_list_out=dep_list_out, sentence_id=count, pos_list=pos_list,
+                                word_dict=word_dict)
 
                             output_file.write(json.dumps(sentence_dict))
                             new_sentence_list_in = []
@@ -292,8 +309,8 @@ def main():
 
         count = 0
         bank_type = 'nivre' if 'nivre' in file_name else 'std'
-        dep_list, pos_list, _ = get_dep_and_pos_list(bank_type=bank_type)
-
+        dep_list, pos_list, word_list, _ = get_dep_and_pos_list(bank_type=bank_type)
+        word_dict = {k: v for v, k in enumerate(word_list)}
         with open(file_path, 'r') as input_file:
             with open(new_file_path, 'w') as output_file:
                 lines = input_file.readlines()
@@ -303,7 +320,7 @@ def main():
                     if line.strip() == '':
                         sentence_dict = process_sentence(
                             sentence_list=new_sentence_list, problem=problem, dep_list=dep_list,
-                            sentence_id=i, pos_list=pos_list)
+                            sentence_id=i, pos_list=pos_list, word_dict=word_dict)
 
                         output_file.write(json.dumps(sentence_dict))
                         new_sentence_list = []
@@ -318,6 +335,30 @@ def main():
 
                 print("Number of samples in %s: %i" % (file_name, count))
                 output_file.write(']')
+
+
+# def count_words_train():
+#     file_name_train = 'en-wsj-std-train-stanford-3.3.0.conll'
+#     file_path_train = get_file_path(file_name=file_name_train)
+#     with open(file_path_train, 'r') as input_file:
+#         lines = input_file.readlines()
+#         for i, line in enumerate(lines):
+#             if line.strip() == '':
+#                 nodes_number = int(last_line[0]) + 1
+#                 if nodes_number > max_nodes:
+#                     max_nodes = nodes_number
+#                 if sample_size is not None and count == sample_size:
+#                     break
+#                 continue
+#             line_as_list = line.split('\t')
+#             pos = line_as_list[3]
+#             dep = line_as_list[7].strip()
+#             pos_set.add(pos)
+#             dep_set.add(dep)
+#             last_line = line_as_list
+        
+    
+
 
 if __name__ == "__main__":
     main()
