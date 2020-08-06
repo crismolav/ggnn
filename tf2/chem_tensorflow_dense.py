@@ -159,7 +159,7 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
         self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
-            tf.int32, [None, None, 4], name='word_inputs')
+            tf.int32, [None, None, 5], name='word_inputs')
         # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
             tf.float32, [None, self.num_edge_types, None, None], name='adjacency_matrix')
@@ -204,6 +204,10 @@ class DenseGGNNChemModel(ChemModel):
             head_loc_inputs = tf.nn.embedding_lookup(
                 self.weights['loc_embeddings'], word_inputs[:, :, 3])
             head_loc_inputs = tf.nn.dropout(head_loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            # BTB: [b, v, l_em]
+            pos_inputs = tf.nn.embedding_lookup(
+                self.weights['pos_embeddings'], word_inputs[:, :, 4])
+            pos_inputs = tf.nn.dropout(pos_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, p_em]
 
             word_inputs = tf.concat([loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
@@ -423,6 +427,7 @@ class DenseGGNNChemModel(ChemModel):
             node_features_vector = self.vectorize_node_features(
                 node_features=d["node_features"], v=chosen_bucket_size , graph=d['graph'])
             x_dim = len(node_features_vector[0])
+            words_head = [0] + [x[0] for x in d['graph']]
 
             bucketed_dict = {
                 'adj_mat':  graph_to_adj_mat_dir(d['graph'], chosen_bucket_size, self.num_edge_types),
@@ -440,7 +445,8 @@ class DenseGGNNChemModel(ChemModel):
                 'words_pos': d["node_features"],
                 'words_loc': [x for x in range(n_active_nodes)],
                 'words_index': d["words_index"],
-                'words_head': [0] + [x[0] for x in d['graph']]
+                'words_head': words_head,
+                'words_head_pos': [d["node_features"][x] for x in words_head]
             }
             bucketed[chosen_bucket_idx].append(bucketed_dict)
 
@@ -620,7 +626,7 @@ class DenseGGNNChemModel(ChemModel):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
                       'task_masks': [], 'sentences_id': [],
                       'words_pos':[], 'words_loc':[], 'words_index': [],
-                      'words_head': []}
+                      'words_head': [], 'words_head_pos': []}
         for d in elements:
             dd = d
             batch_data['adj_mat'].append(d['adj_mat'])
@@ -632,6 +638,7 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['words_loc'].append(d['words_loc'])
             batch_data['words_index'].append(d['words_index'])
             batch_data['words_head'].append(d['words_head'])
+            batch_data['words_head_pos'].append(d['words_head_pos'])
 
             target_task_values = []
             target_task_mask = []
@@ -702,19 +709,18 @@ class DenseGGNNChemModel(ChemModel):
             # BTB [b, v * e * o_] ID: [o, v, e, b]
             pos_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_pos'], b=num_graphs, v=bucket_sizes[bucket])
-            # [b, v]
             loc_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_loc'], b=num_graphs, v=bucket_sizes[bucket])
-            # [b, v]
             word_id_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_index'], b=num_graphs, v=bucket_sizes[bucket])
-            # [b, v]
             head_loc_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_head'], b=num_graphs, v=bucket_sizes[bucket])
+            head_pos_inputs = self.get_word_inputs_padded(
+                words_pos=batch_data['words_head_pos'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
-            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs, head_loc_inputs), axis=2)
-            # [b, v, 4]
-
+            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
+                                    head_loc_inputs, head_pos_inputs), axis=2)
+            # [b, v, 5]
             batch_feed_dict = {
                 self.placeholders['initial_node_representation']: initial_representations,
                 # ID: [e, b, v, h] else [b, v, h]

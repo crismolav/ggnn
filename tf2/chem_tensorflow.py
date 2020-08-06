@@ -74,7 +74,7 @@ class ChemModel(object):
             'out_layer_dropout_keep_prob': 0.90,
             'emb_dropout_keep_prob': 0.65,
             'hidden_size': 600 if self.args['--pr'] not in ['identity'] else 350,
-            'num_timesteps': 4,
+            'num_timesteps': 12,
             'use_graph': True,
 
             'tie_fwd_bkwd': True,
