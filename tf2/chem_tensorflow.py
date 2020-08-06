@@ -71,10 +71,10 @@ class ChemModel(object):
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
-            'out_layer_dropout_keep_prob': 0.90,
-            'emb_dropout_keep_prob': 0.65,
+            'out_layer_dropout_keep_prob': 0.80,
+            'emb_dropout_keep_prob': 0.6,
             'hidden_size': 600 if self.args['--pr'] not in ['identity'] else 350,
-            'num_timesteps': 12,
+            'num_timesteps': 4,
             'use_graph': True,
 
             'tie_fwd_bkwd': True,
@@ -156,6 +156,7 @@ class ChemModel(object):
         self.pos_embedding_size  = 50
         self.loc_embedding_size  = 80
         self.word_embedding_size = 100
+        self.edge_embedding_size = 50
 
         self.dep_list, self.pos_list, _, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
@@ -527,7 +528,6 @@ class ChemModel(object):
             sentences_id = result[22]
             word_inputs = result[23]
             loss_ = result[0]
-
             # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
@@ -535,11 +535,12 @@ class ChemModel(object):
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
 
+
             try:
                 las, uas = self.get_batch_attachment_scores(
                     targets=labels, computed_values= computed_values,
                     mask=node_mask, num_vertices=num_vertices,
-                    sentences_id=sentences_id)
+                    sentences_id=sentences_id, adjacency_matrix=adjacency_matrix)
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
             except:
