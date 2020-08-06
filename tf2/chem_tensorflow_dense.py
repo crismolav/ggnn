@@ -159,7 +159,7 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
         self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
-            tf.int32, [None, None, 3], name='word_inputs')
+            tf.int32, [None, None, 4], name='word_inputs')
         # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
             tf.float32, [None, self.num_edge_types, None, None], name='adjacency_matrix')
@@ -201,9 +201,14 @@ class DenseGGNNChemModel(ChemModel):
                 self.weights['word_embeddings'], word_inputs[:, :, 2])
             word_index_inputs = tf.nn.dropout(word_index_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, w_em]
-            word_inputs = tf.concat([loc_inputs, pos_inputs, word_index_inputs], 2)
+            head_loc_inputs = tf.nn.embedding_lookup(
+                self.weights['loc_embeddings'], word_inputs[:, :, 3])
+            head_loc_inputs = tf.nn.dropout(head_loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            # BTB: [b, v, p_em]
+
+            word_inputs = tf.concat([loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em]
-            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - (p_em + l_em + w_em)]])
+            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - (p_em + 2*l_em + w_em)]])
             # BTB: [b, v, h]
             return word_inputs
         else:
@@ -340,7 +345,7 @@ class DenseGGNNChemModel(ChemModel):
         w_em = self.word_embedding_size
 
         initial_node_representation = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
-        gate_input = tf.concat([last_h, initial_node_representation], axis = -1)
+        gate_input = tf.concat([initial_node_representation, initial_node_representation], axis = -1)
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
@@ -434,7 +439,8 @@ class DenseGGNNChemModel(ChemModel):
                 'id' : d['id'] if 'id' in d else None,
                 'words_pos': d["node_features"],
                 'words_loc': [x for x in range(n_active_nodes)],
-                'words_index': d["words_index"]
+                'words_index': d["words_index"],
+                'words_head': [0] + [x[0] for x in d['graph']]
             }
             bucketed[chosen_bucket_idx].append(bucketed_dict)
 
@@ -613,7 +619,8 @@ class DenseGGNNChemModel(ChemModel):
     def make_batch(self, elements):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
                       'task_masks': [], 'sentences_id': [],
-                      'words_pos':[], 'words_loc':[], 'words_index': []}
+                      'words_pos':[], 'words_loc':[], 'words_index': [],
+                      'words_head': []}
         for d in elements:
             dd = d
             batch_data['adj_mat'].append(d['adj_mat'])
@@ -624,6 +631,7 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['words_pos'].append(d['words_pos'])
             batch_data['words_loc'].append(d['words_loc'])
             batch_data['words_index'].append(d['words_index'])
+            batch_data['words_head'].append(d['words_head'])
 
             target_task_values = []
             target_task_mask = []
@@ -701,8 +709,12 @@ class DenseGGNNChemModel(ChemModel):
             word_id_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_index'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
-            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs), axis=2)
-            # [b, v, 3]
+            head_loc_inputs = self.get_word_inputs_padded(
+                words_pos=batch_data['words_head'], b=num_graphs, v=bucket_sizes[bucket])
+            # [b, v]
+            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs, head_loc_inputs), axis=2)
+            # [b, v, 4]
+
             batch_feed_dict = {
                 self.placeholders['initial_node_representation']: initial_representations,
                 # ID: [e, b, v, h] else [b, v, h]

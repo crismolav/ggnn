@@ -71,9 +71,9 @@ class ChemModel(object):
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
-            'out_layer_dropout_keep_prob': 0.95,
-            'emb_dropout_keep_prob': 0.7,
-            'hidden_size': 500 if self.args['--pr'] not in ['identity'] else 350,
+            'out_layer_dropout_keep_prob': 0.90,
+            'emb_dropout_keep_prob': 0.65,
+            'hidden_size': 600 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -155,7 +155,7 @@ class ChemModel(object):
         # embedding sizes
         self.pos_embedding_size  = 50
         self.loc_embedding_size  = 80
-        self.word_embedding_size = 300
+        self.word_embedding_size = 100
 
         self.dep_list, self.pos_list, _, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='std')
