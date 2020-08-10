@@ -59,6 +59,18 @@ def graph_to_adj_mat_dir(graph, max_n_vertices, num_edge_types):
     #[e, v', v]
     return amat
 
+def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types):
+    amat = np.zeros((2*num_edge_types, max_n_vertices, max_n_vertices))
+    for i, (src, e, dest) in enumerate(graph):
+        # incoming edge
+        edge_index = e - 1
+        amat[edge_index, dest, src] = 1
+        # outgoing edge
+        new_edge = edge_index + num_edge_types
+        amat[new_edge, src, dest] = 1
+    #[2e, v', v]
+    return amat
+
 def get_adj_mat_with_annotations(graph, node_features,  max_n_vertices, num_edge_types, annotation_size):
     amat = np.zeros((num_edge_types, max_n_vertices, max_n_vertices, annotation_size))
     for i, (src, e, dest) in enumerate(graph):
@@ -162,14 +174,19 @@ class DenseGGNNChemModel(ChemModel):
             tf.int32, [None, None, 6], name='word_inputs')
         # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
-            tf.float32, [None, self.num_edge_types, None, None], name='adjacency_matrix')
+            tf.float32, [None, 2 * self.num_edge_types, None, None], name='adjacency_matrix')
         # [b, e, v', v]
         self.__adjacency_matrix = tf.transpose(a=self.placeholders['adjacency_matrix'], perm=[1, 0, 2, 3])
         # [e, b, v', v]
         # weights
-        self.weights['edge_weights'] = tf.Variable(glorot_init([self.num_edge_types, h_dim, h_dim]))
+        # self.weights['edge_weights'] = tf.Variable(glorot_init([self.num_edge_types, h_dim, h_dim]))
+        # if self.params['use_edge_bias']:
+        #     self.weights['edge_biases'] = tf.Variable(np.zeros([self.num_edge_types, 1, h_dim]).astype(np.float32))
+        #weights bi directional matrix
+        self.weights['edge_weights'] = tf.Variable(glorot_init([2 * self.num_edge_types, h_dim, h_dim]))
         if self.params['use_edge_bias']:
-            self.weights['edge_biases'] = tf.Variable(np.zeros([self.num_edge_types, 1, h_dim]).astype(np.float32))
+            self.weights['edge_biases'] = tf.Variable(np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
+
         self.weights['loc_embeddings'] = tf.compat.v1.get_variable(
             'loc_embeddings', [self.max_nodes, self.loc_embedding_size],
             dtype=tf.float32)
@@ -232,6 +249,7 @@ class DenseGGNNChemModel(ChemModel):
     def compute_final_node_representations(self) -> tf.Tensor:
         v = self.placeholders['num_vertices']
         e = self.num_edge_types
+        b = self.placeholders['num_graphs']
         h_dim = self.params['hidden_size']
         p_em = self.pos_embedding_size
         l_em = self.loc_embedding_size
@@ -239,7 +257,6 @@ class DenseGGNNChemModel(ChemModel):
         h = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
         # BTB: [b * v, h] ID: [e, b, v, h] else : [b, v, h]    v' main dimension
         self.ops['word_inputs'] = h
-
         h = tf.reshape(h, [-1, h_dim])
         # BTB: [b * v, h] ID: [e * b * v, h] else : [b * v, h]
 
@@ -247,7 +264,7 @@ class DenseGGNNChemModel(ChemModel):
             for i in range(self.params['num_timesteps']):
                 if i > 0:
                     tf.compat.v1.get_variable_scope().reuse_variables()
-                acts = self.compute_timestep(h, e, v, h_dim)
+                acts = self.compute_timestep(h, e, v, b, h_dim)
                 # ID [e * b * v, h] else (b * v, h)
                 h = self.weights['node_gru'](acts, h)[1]
                 # ID [e * b * v, h]  NL (b * v, h) (b * v, h)                                      # [b*v, h]
@@ -258,9 +275,9 @@ class DenseGGNNChemModel(ChemModel):
                 last_h = tf.reshape(h, [-1, v, h_dim]) # (b, v, h)
         return last_h
 
-    def compute_timestep(self, h, e, v, h_dim):
+    def compute_timestep(self, h, e, v, b, h_dim):
         if self.args['--pr'] in ['identity', 'btb'] and self.args.get('--new'):
-            acts = self.compute_timestep_fast(h, e, v, h_dim)
+            acts = self.compute_timestep_fast(h, e, v, b, h_dim)
         else:
             acts = self.compute_timestep_normal(h, e, v, h_dim)
         # ID [e, b, v, h] [b, v, h]
@@ -305,34 +322,31 @@ class DenseGGNNChemModel(ChemModel):
 
         return acts
 
-    def compute_timestep_fast(self, h, e, v, h_dim):
+    def compute_timestep_fast(self, h, e, v, b, h_dim):
         # h: ID: [e* b* v, h] else: [b * v, h]
-        # 'edge_weights' : [e, h, h]
+        # 'edge_weights' : [e, h, h]  bd: [2e, h, h]
         if self.args['--pr'] in ['identity']:
             h = tf.reshape(h, [e, -1, h_dim]) #ID: [e, b * v, h]
         m = tf.matmul(h, tf.nn.dropout(
             self.weights['edge_weights'],
             rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))
-        # [e, b * v, h]
+        # [e, b * v, h]  bd: [2e, b * v, h]
         self.ops['m1'] = tf.identity(m)
-        # if self.args['--pr'] not in ['identity']:
-        #     m = tf.reshape(m, [e, -1, v, h_dim])  # [e, b, v, h]
 
-        # #TODO: check this
         if self.params['use_edge_bias']:
-            #edge_biases : [e, 1, h]
+            #edge_biases : [e, 1, h] bd: [2e, h, h]
             m += self.weights['edge_biases']
 
-        m = tf.reshape(m, [e, -1, v, h_dim])  #[e, b, v, h]
-        adj_m = self.__adjacency_matrix #  [e, b, v', v]
+        m = tf.reshape(m, [-1, b, v, h_dim])  #[e, b, v, h] bd: [2e, b, v, h]
+        adj_m = self.__adjacency_matrix #  [e, b, v', v] bd: [2e, b, v', v]
 
         if self.args['--pr'] not in ['identity']:
             m = tf.transpose(m, [1, 0, 2, 3]) #  [b, e, v, h]
-            m = tf.reshape(m, [-1, e * v, h_dim]) #  [b, e * v, h]
+            m = tf.reshape(m, [b, -1, h_dim]) #  [b, e * v, h]  bd: [b, 2e * v, h]
 
             #TODO try other option for v
             adj_m = tf.transpose(self.__adjacency_matrix, [1, 2, 0, 3]) # [b, v', e, v]
-            adj_m = tf.reshape(adj_m, [-1, v, e * v]) # [b, v' , e * v]
+            adj_m = tf.reshape(adj_m, [b, v, -1]) # [b, v' , e * v] bd: [b, v', 2e * v]
             # acts = tf.math.reduce_sum(acts, axis=0)  # [b, v, h]
 
         # adj_m  else [b, v' , e * v] ID :[e, b, v', v]
@@ -441,8 +455,8 @@ class DenseGGNNChemModel(ChemModel):
             words_head = [0] + [x[0] for x in d['graph']]
             edges_index = [0] + [x[1] for x in d['graph']]
             bucketed_dict = {
-                'adj_mat':  graph_to_adj_mat_dir(d['graph'], chosen_bucket_size, self.num_edge_types),
-                #[e, v', v]
+                'adj_mat':  graph_to_adj_mat_bd(d['graph'], chosen_bucket_size, self.num_edge_types),
+                #[e, v', v] bd [2e, v', v]
                 'init': node_features_vector + [[0 for _ in range(x_dim)] for __ in
                                               range(chosen_bucket_size - n_active_nodes)],
                 'labels':  self.get_labels_padded(
@@ -746,7 +760,7 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['num_graphs']: num_graphs,
                 self.placeholders['num_vertices']: bucket_sizes[bucket],
                 self.placeholders['adjacency_matrix']: batch_data['adj_mat'],
-                #[b, e, v', v]
+                #[b, e, v', v] bd: [b, 2e, v', v]
                 self.placeholders['node_mask']: np.array(batch_data['node_mask']),
                 # BTB [b, v * e * o_] ID [b, e * v * o]
                 self.placeholders['graph_state_keep_prob']: dropout_keep_prob,

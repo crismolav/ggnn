@@ -225,7 +225,6 @@ class ChemModel(object):
             num_fwd_edge_types = max(num_fwd_edge_types, max([e[1] for e in g['graph']]))
 
         self.num_edge_types = max([len(self.dep_list), self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2)])
-
         self.annotation_size = self.get_annotation_size(data=data)
         self.pos_size = len(self.pos_list)
 
