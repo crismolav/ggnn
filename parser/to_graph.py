@@ -40,7 +40,7 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         new_edge = [int(father), edge_type, int(id)]
         graph.append(new_edge)
         sentence_pos_list.append(pos)
-        word_index = word_dict[word]
+        word_index = word_dict[word] if word in word_dict else word_dict['NA']
         words_index_list.append(word_index)
 
         if problem == 'root' and int(father) == 0:
@@ -229,7 +229,8 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                 word = line_as_list[1].lower()
                 pos = line_as_list[3]
                 dep = line_as_list[7].strip()
-                word_set.add(word)
+                if file_name in ['en-wsj-std-train-stanford-3.3.0.conll']:
+                    word_set.add(word)
                 pos_set.add(pos)
                 dep_set.add(dep)
                 last_line = line_as_list
@@ -242,7 +243,7 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
     pos_list.sort()
     word_list.sort()
     pos_list = ['zero'] + pos_list
-    word_list = ['zero'] + word_list
+    word_list = ['zero'] + word_list + ['NA']
     vocab_size = len(word_list)
 
     return dep_list, pos_list, word_list, vocab_size, max_nodes
