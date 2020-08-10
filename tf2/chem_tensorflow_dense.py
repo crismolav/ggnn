@@ -221,7 +221,7 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = tf.nn.dropout(edges_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, e_em]
 
-            word_inputs = tf.concat([loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs, edges_inputs], 2)
+            word_inputs = tf.concat([loc_inputs, pos_inputs, word_index_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]])
             # BTB: [b, v, h]
