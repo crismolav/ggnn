@@ -279,13 +279,15 @@ class DenseGGNNChemModel(ChemModel):
         if self.args['--pr'] in ['identity', 'btb'] and self.args.get('--new'):
             acts = self.compute_timestep_fast(h, e, v, b, h_dim)
         else:
-            acts = self.compute_timestep_normal(h, e, v, h_dim)
+            acts = self.compute_timestep_normal(h, e, v, b, h_dim)
         # ID [e, b, v, h] [b, v, h]
         return acts
 
-    def compute_timestep_normal(self, h, e, v, h_dim):
+    def compute_timestep_normal(self, h, e, v, b, h_dim):
         #h: ID: [e* b* v, h] else : [b * v, h]
-        for edge_type in range(self.num_edge_types):
+        num_edges = self.__adjacency_matrix.shape[0]
+
+        for edge_type in range(num_edges):
             # 'edge_weights' : [e, h, h]
             m = tf.matmul(h, tf.nn.dropout(
                 self.weights['edge_weights'][edge_type],
@@ -295,9 +297,9 @@ class DenseGGNNChemModel(ChemModel):
             self.ops['m1'] = tf.identity(m)
 
             if self.args['--pr'] in ['identity']:
-                m = tf.reshape(m, [e, -1, v, h_dim]) # [e, b, v, h]
+                m = tf.reshape(m, [-1, b, v, h_dim]) # [e, b, v, h]
             else:
-                m = tf.reshape(m, [-1, v, h_dim])  # [b, v, h]
+                m = tf.reshape(m, [b, -1, h_dim])  # [b, v, h]
             if self.params['use_edge_bias']:
                 # edge_biases [e, 1, h]
                 m += self.weights['edge_biases'][edge_type]
