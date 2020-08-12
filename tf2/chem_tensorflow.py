@@ -170,6 +170,7 @@ class ChemModel(object):
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
         self.output_size_edges = self.num_edge_types
+
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -262,6 +263,8 @@ class ChemModel(object):
                 tf.float32, [None, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
                 tf.float32, [self.num_edge_types, None], name='target_mask')
+            self.placeholders['target_values_edges'] = tf.compat.v1.placeholder(
+                tf.float32, [None, None], name='target_values')
         else:
             self.placeholders['target_values'] = tf.compat.v1.placeholder(
                 tf.float32, [None, len(self.params['task_ids']), None], name='target_values')
@@ -285,20 +288,23 @@ class ChemModel(object):
                 with tf.compat.v1.variable_scope("regression_gate"):
                     self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
+                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
+                    self.weights['regression_transform_task_edges%i' % task_id] = MLP(self.params['hidden_size'], self.output_size_edges, [],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
 
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
-                computed_values_2 = self.gated_regression(self.ops['final_node_representations'],
-                                                         self.weights['regression_gate_task%i' % task_id],
-                                                         self.weights['regression_transform_task%i' % task_id])
+                if self.args['--pr'] in ['btb']:
+                    computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
+                                                         self.weights['regression_gate_task_edges%i' % task_id],
+                                                         self.weights['regression_transform_task_edges%i' % task_id])
+                    # [b, v * e]
+
                 # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 task_target_mask = self.placeholders['target_mask'][internal_id, :]
                 # ID [b] else: [b]
@@ -548,7 +554,6 @@ class ChemModel(object):
             writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
-
 
             try:
                 las, uas = self.get_batch_attachment_scores(
