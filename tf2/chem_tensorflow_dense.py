@@ -229,7 +229,7 @@ class DenseGGNNChemModel(ChemModel):
             word_index_inputs = tf.nn.dropout(word_index_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, w_em]
             head_loc_inputs = tf.nn.embedding_lookup(
-                self.weights['head_loc_embeddings'], word_inputs[:, :, 3])
+                self.weights['loc_embeddings'], word_inputs[:, :, 3])
             head_loc_inputs = tf.nn.dropout(head_loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, l_em]
             head_pos_inputs = tf.nn.embedding_lookup(
