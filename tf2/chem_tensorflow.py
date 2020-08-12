@@ -285,10 +285,10 @@ class ChemModel(object):
 
                 output_size =  self.params['output_size'] if self.args['--pr'] != 'btb' else self.params['output_size']*e_
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [300],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
+                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [300],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
 
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
