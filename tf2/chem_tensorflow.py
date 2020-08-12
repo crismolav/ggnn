@@ -67,7 +67,7 @@ class ChemModel(object):
 
         return {
             'batch_size': 20,
-            'num_epochs': 500,
+            'num_epochs': 200,
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
@@ -85,7 +85,7 @@ class ChemModel(object):
             'train_file': train_file,
             'valid_file': valid_file,
             'restrict': self.args.get("--restrict_data"),
-            'output_size': output_size
+            'output_size': output_size,
         }
 
     def get_id_sample_params(self):
@@ -169,7 +169,7 @@ class ChemModel(object):
 
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
-
+        self.output_size_edges = self.num_edge_types
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -281,20 +281,25 @@ class ChemModel(object):
         self.ops['losses'] = []
         for (internal_id, task_id) in enumerate(self.params['task_ids']):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
-                e_ = 1 if self.args.get('--no_labels') else self.num_edge_types
-
-                output_size =  self.params['output_size'] if self.args['--pr'] != 'btb' else self.params['output_size']*e_
+                output_size =  self.params['output_size']
                 with tf.compat.v1.variable_scope("regression_gate"):
                     self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
+                                                                           self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
+                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
+                                                                                self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
 
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
-                # BTB [b, v * e * o_] ID [e * v * o,  b]  o is 1 for BTB
+                computed_values_2 = self.gated_regression(self.ops['final_node_representations'],
+                                                         self.weights['regression_gate_task%i' % task_id],
+                                                         self.weights['regression_transform_task%i' % task_id])
+                # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 task_target_mask = self.placeholders['target_mask'][internal_id, :]
                 # ID [b] else: [b]
                 task_target_num = tf.reduce_sum(input_tensor=task_target_mask) + SMALL_NUMBER
@@ -334,7 +339,7 @@ class ChemModel(object):
                 if  self.args['--pr'] == 'molecule':
                     self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
                 else:
-                    if self.args.get('--no_labels'):
+                    if self.args.get('--no_labels') or self.args.get('--only_labels'):
                         computed_values, labels, mask = self.reduce_edge_dimension(
                             computed_values=computed_values, labels=labels, mask=mask)
 
@@ -395,13 +400,23 @@ class ChemModel(object):
         labels = tf.reshape(labels, [b, e, v, v]) # [b, e, v', v]
         mask = tf.reshape(mask,[b, e, v, v]) # [b, e, v', v]
 
-        computed_values = tf.math.reduce_sum(computed_values, axis = 1)
-        labels = tf.math.reduce_sum(labels, axis=1)
-        mask = tf.math.reduce_mean(mask, axis=1)
+        if self.args.get('--only_labels'):
+            ax = 3
+            computed_values = tf.math.reduce_sum(computed_values, axis=ax)
+            labels = tf.math.reduce_sum(labels, axis=ax)
+            mask = tf.math.reduce_mean(mask, axis=ax)
 
-        computed_values = tf.reshape(computed_values, [b, v * v]) # [b, v', v]
-        labels = tf.reshape(labels, [b, v * v]) # [b, v', v]
-        mask = tf.reshape(mask, [b, v * v]) # [b, v', v]
+            computed_values = tf.reshape(computed_values, [b, e * v])  # [b, e * v']
+            labels = tf.reshape(labels, [b, e * v])  # [b, e * v']
+            mask = tf.reshape(mask, [b, e * v])  # [b, e * v']
+        else:
+            computed_values = tf.math.reduce_sum(computed_values, axis = 1)
+            labels = tf.math.reduce_sum(labels, axis=1)
+            mask = tf.math.reduce_mean(mask, axis=1)
+
+            computed_values = tf.reshape(computed_values, [b, v * v]) # [b, v' * v]
+            labels = tf.reshape(labels, [b, v * v]) # [b, v' * v]
+            mask = tf.reshape(mask, [b, v * v]) # [b, v' * v]
 
         return computed_values, labels, mask
 

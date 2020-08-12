@@ -22,6 +22,7 @@ Options:
     --alpha K                learning rate
     --new                    new way of calculating
     --no_labels              no labels considered
+    --only_labels            only labels considered
     --train_with_dev         use dev set which is smaller for training
 """
 from __future__ import print_function
@@ -389,7 +390,7 @@ class DenseGGNNChemModel(ChemModel):
         last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
         # ID [e * b * v, h] else [b * v, h]
         gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
-        # BTB [b * v, e * o_] ID [e * b * v, o] else [b * v, 1]
+        # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
 
         node_mask = self.placeholders['node_mask']
         # BTB: #[b, v * e * o_] ID [b, e * v * o]
@@ -423,12 +424,11 @@ class DenseGGNNChemModel(ChemModel):
             # self.ops['regression_gate'] = regression_gate(gate_input)
             # self.ops['regression_transform'] = regression_transform(last_h)
         elif self.args['--pr'] in ['btb']:
-            # gated_outputs  [b * v, e * o_]
-            # node_mask [b, v * e * o_]
-            e_ = 1 if self.args.get('--no_labels') else self.num_edge_types
-            gated_outputs = tf.reshape(gated_outputs, [b, v, e_ * output_n])  # [b, v, e * o_]
-            softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, e * o_]
-            softmax = tf.reshape(softmax, [b, v * e_ * output_n]) # [b, v * e * o_]
+            # gated_outputs  [b * v, o]
+            # node_mask [b, v * e * o]
+            gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
+            softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, o]
+            softmax = tf.reshape(softmax, [b, v * output_n]) # [b, v * o]
             self.output = softmax
 
         else:
@@ -577,11 +577,12 @@ class DenseGGNNChemModel(ChemModel):
             if self.args['--pr'] in ['btb']:
                 final_mask = np.reshape(final_mask, [e, v, o]) # BTB [e, v, o]
                 final_mask = np.transpose(final_mask, [1, 0, 2]) # BTB [v, e, o]
-                if self.args.get('--no_labels'):
+
+                if self.args.get('--no_labels') or self.args.get('--only_labels'):
                     final_mask = np.mean(final_mask, axis=1)
                 final_mask = np.reshape(final_mask, [-1])
 
-            return final_mask  # BTB [v * e * o] ID [e * v, o]
+            return final_mask  # BTB [v * o] ID [e * v, o]
         else:
             return [1. for _ in range(n_active_nodes) ] + [0. for _ in range(chosen_bucket_size - n_active_nodes)]
 
@@ -801,6 +802,7 @@ class DenseGGNNChemModel(ChemModel):
             new_labels = np.pad(new_labels,
                                 pad_width=[[0, 0], [0, 0], [0, 0], [0, o_ - v]],
                                 mode='constant')  # BTB [b, v', e, o_]
+
             if self.args.get('--no_labels'):
                 new_labels = np.sum(new_labels, axis=2) # BTB [b, v', o_]
                 e = 1
