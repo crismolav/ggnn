@@ -190,6 +190,11 @@ class DenseGGNNChemModel(ChemModel):
         self.weights['loc_embeddings'] = tf.compat.v1.get_variable(
             'loc_embeddings', [self.max_nodes, self.loc_embedding_size],
             dtype=tf.float32)
+
+        self.weights['head_loc_embeddings'] = tf.compat.v1.get_variable(
+            'head_loc_embeddings', [self.max_nodes, self.loc_embedding_size],
+            dtype=tf.float32)
+
         self.weights['pos_embeddings'] = tf.compat.v1.get_variable(
             'pos_embedding', [self.pos_size, self.pos_embedding_size],
             dtype=tf.float32)
@@ -224,7 +229,7 @@ class DenseGGNNChemModel(ChemModel):
             word_index_inputs = tf.nn.dropout(word_index_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, w_em]
             head_loc_inputs = tf.nn.embedding_lookup(
-                self.weights['loc_embeddings'], word_inputs[:, :, 3])
+                self.weights['head_loc_embeddings'], word_inputs[:, :, 3])
             head_loc_inputs = tf.nn.dropout(head_loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, l_em]
             head_pos_inputs = tf.nn.embedding_lookup(
@@ -239,7 +244,7 @@ class DenseGGNNChemModel(ChemModel):
             # BTB: [b, v, e_em]
 
             word_inputs = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs, head_pos_inputs, edges_inputs], 2)
+                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]])
             # BTB: [b, v, h]
