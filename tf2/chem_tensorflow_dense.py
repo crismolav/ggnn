@@ -750,9 +750,12 @@ class DenseGGNNChemModel(ChemModel):
                 adj_mat=batch_data['adj_mat'], sentences_id=batch_data['sentences_id'],
                 words_pos=batch_data['words_pos'])
             #ID: [e, b, v, h] else [b, v, h]
+
             # batch_data['labels'] [b, e, v', v]
-            target_values = self.get_target_values_formatted(labels=batch_data['labels'])
-            # BTB [b, v * e * o_] ID: [o, v, e, b]
+
+            target_values = self.get_target_values_formatted(
+                labels=batch_data['labels'], no_labels=True)
+            # BTB [b, v * o] ID: [o, v, e, b]
             target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
             # [b, v * e]
             pos_inputs = self.get_word_inputs_padded(
@@ -775,12 +778,9 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['initial_node_representation']: initial_representations,
                 # ID: [e, b, v, h] else [b, v, h]
                 self.placeholders['target_values']: target_values,
-                #BTB [b, v * e * o]  ID: [o, v, e, b] head [v, 1, b]
-                self.placeholders['target_values_original']: target_values,
-                # BTB [b, v * e * o]  ID: [o, v, e, b] head [v, 1, b]
+                #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
                 self.placeholders['target_values_edges']: target_values_edges,
                 # [b, v * e]
-
                 self.placeholders['target_mask']: np.transpose(batch_data['task_masks'], axes=[1, 0]),
                 #BTB [v, b] ID [v, b] else: [1, b]
                 self.placeholders['num_graphs']: num_graphs,
@@ -822,7 +822,7 @@ class DenseGGNNChemModel(ChemModel):
 
         return new_labels
 
-    def get_target_values_formatted(self, labels):
+    def get_target_values_formatted(self, labels, no_labels=True):
         if self.args['--pr'] in ['btb']:
             # labels [b, e, v', v]
             o = self.params['output_size']
@@ -831,12 +831,13 @@ class DenseGGNNChemModel(ChemModel):
             new_labels = np.transpose(labels, axes=[0, 2, 1, 3]) # BTB [b, v', e, v]
             new_labels = np.pad(new_labels,
                                 pad_width=[[0, 0], [0, 0], [0, 0], [0, o - v]],
-                                mode='constant')  # BTB [b, v', e, o_]
+                                mode='constant')  # BTB [b, v', e, o]
 
-            if self.args.get('--no_labels'):
+            if no_labels:
                 new_labels = np.sum(new_labels, axis=2) # BTB [b, v', o]
+                e = 1
 
-            new_labels = np.reshape(new_labels, [b, v * o])   # BTB [b, v * o_]
+            new_labels = np.reshape(new_labels, [b, v * e * o])   # BTB [b, v * e * o] [b, v * 1 * o]
             return new_labels
         else:
             return np.transpose(np.array(labels))
@@ -1094,13 +1095,14 @@ class DenseGGNNChemModel(ChemModel):
 
     def print_all_results_as_graph(
             self, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids=None,
-            all_adms=None, all_computed_values_e=None, all_mask_edges=None, out_file=None):
+            all_adms=None, all_labels_e=None, all_computed_values_e=None, all_mask_edges=None, out_file=None):
         max_i = 8
         for i, computed_values in enumerate(all_computed_values):
             if i == max_i:
                 break
             computed_values_e = all_computed_values_e[i] # [b, v * e]
             labels = all_labels[i]
+            labels_e = all_labels_e[i]
             num_vertices = all_num_vertices[i]
             mask = all_masks[i]
             mask_edges = all_mask_edges[i]
@@ -1109,16 +1111,16 @@ class DenseGGNNChemModel(ChemModel):
 
             self.print_batch_results_as_graph(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
-                mask=mask, ids=ids, adms=adms, computed_values_e=computed_values_e,
+                mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, out_file=out_file)
 
     def print_batch_results_as_graph(self, labels, computed_values, num_vertices, mask,
-                                     ids=None, adms=None, computed_values_e=None,
+                                     ids=None, adms=None, labels_e=None, computed_values_e=None,
                                      mask_edges=None, out_file=None):
         if self.args['--pr'] in ['btb']:
             self.print_batch_results_as_graph_btb(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
-                mask=mask, ids=ids, adms=adms, computed_values_e=computed_values_e,
+                mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, out_file=out_file)
         else:
             self.print_batch_results_as_graph_others(
@@ -1150,8 +1152,8 @@ class DenseGGNNChemModel(ChemModel):
                 id, target_graph, result_graph))
 
     def print_batch_results_as_graph_btb(self, labels, computed_values, num_vertices,
-                                         mask, ids=None, adms=None, computed_values_e=None,
-                                         mask_edges=None, out_file=None):
+                                         mask, ids=None, adms=None, labels_e=None,
+                                         computed_values_e=None, mask_edges=None, out_file=None):
         e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
 
         _, results_reshaped, targets_reshaped = self.get_results_reshaped(
@@ -1159,33 +1161,37 @@ class DenseGGNNChemModel(ChemModel):
             num_vertices=num_vertices)
         # [b, 1, v', o]
 
-        results_masked_e = np.multiply(computed_values_e, mask_edges)  # [b, v * e]
-        results_reshaped_e = np.reshape(results_masked_e, [-1, v, e, 1])  # [b, v, e, 1]
-        results_reshaped_e = np.transpose(results_reshaped_e, [0, 2, 1, 3])  # [b, e, v, 1]
-
+        _, results_reshaped_e, targets_reshaped_e = self.get_results_reshaped(
+            targets=labels_e, computed_values=computed_values_e, mask=mask_edges,
+            num_vertices=num_vertices, is_edge=True)
+        # [b, e, v, 1]
         e = self.num_edge_types
         for i, result in enumerate(results_reshaped):
             result_e = results_reshaped_e[i]
             target = targets_reshaped[i]
+            target_e = targets_reshaped_e[i]
             id = ids[i]
             adm = adms[i][:e, :, :]
-            target_graph = adj_mat_to_target(adj_mat=target)
-            result_graph_l = adj_mat_to_target(
-                adj_mat=result, is_probability=True, true_target=target_graph)
+            target_graph_h = adj_mat_to_target(adj_mat=target)
+            target_graph_e = adj_mat_to_target(adj_mat=target_e)
+            target_graph = self.merge_head_and_edge_graph(target_graph_h, target_graph_e)
+
+            result_graph_h = adj_mat_to_target(
+                adj_mat=result, is_probability=True, true_target=target_graph_h)
             result_graph_e = adj_mat_to_target(
                 adj_mat=result_e, is_probability=True)
-            result_graph = self.merge_label_and_edge_results(result_graph_l, result_graph_e)
+            result_graph = self.merge_head_and_edge_graph(result_graph_h, result_graph_e)
 
             input_graph =  adj_mat_to_target(adj_mat=adm)
-            set_trace()
+
             if out_file is None:
                 print("id %s target vs predicted: \n%s vs \n%s\n" % (
-                    id, input_graph, result_graph))
+                    id, target_graph, result_graph))
             else:
-                out_file.write("id %s target vs predicted: \n%s vs \n\n%s vs \n\n" % (
-                    id, input_graph, result_graph))
+                out_file.write("id %s target vs predicted vs input: \n%s vs \n\n%s vs \n\n%s\n\n" % (
+                    id, target_graph, result_graph, input_graph))
 
-    def merge_label_and_edge_results(self, result_graph_l, result_graph_e):
+    def merge_head_and_edge_graph(self, result_graph_l, result_graph_e):
         return [[x[0], y[1]] for x, y in zip(result_graph_l, result_graph_e)]
 
     @staticmethod
