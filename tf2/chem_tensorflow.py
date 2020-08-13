@@ -265,6 +265,8 @@ class ChemModel(object):
                 tf.float32, [self.num_edge_types, None], name='target_mask')
             self.placeholders['target_values_edges'] = tf.compat.v1.placeholder(
                 tf.float32, [None, None], name='target_values')
+            self.placeholders['target_values_original'] = tf.compat.v1.placeholder(
+                tf.float32, [None, None], name='target_values_original')
         else:
             self.placeholders['target_values'] = tf.compat.v1.placeholder(
                 tf.float32, [None, len(self.params['task_ids']), None], name='target_values')
@@ -323,7 +325,7 @@ class ChemModel(object):
                     mask = tf.transpose(a=self.placeholders['node_mask'])  # [e * v * o,b]
                     # ID: [e * v * o,b]
                 elif self.args['--pr'] in ['btb']:
-                    labels = self.placeholders['target_values']  # [b, v * o]
+                    labels = self.placeholders['target_values']  # [b, v * e * o]
                     mask = self.placeholders['node_mask'] #[b, v * e * o_]
                     labels_edges = self.placeholders['target_values_edges']  # [b, v * e]
                     mask_edges = self.placeholders['node_mask_edges'] # [b, v * e]
@@ -354,9 +356,9 @@ class ChemModel(object):
                             computed_values=computed_values, labels=labels, mask=mask)
 
                     if self.args['--pr'] == 'btb':
-                        task_loss_labels = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
+                        task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))/task_target_num
-                        task_loss = task_loss_labels + task_loss_edges
+                        task_loss = task_loss_heads + task_loss_edges
                     else:
                         new_mask = tf.cast(mask, tf.bool)
                         masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
@@ -506,8 +508,9 @@ class ChemModel(object):
         acc_las, acc_uas = 0, 0
         acc_uas_e = 0
         batch_iterator = ThreadedIterator(self.make_minibatch_iterator(data, is_training), max_queue_size=5)
-        all_labels, all_computed_values, all_num_vertices, all_masks, all_ids, all_adj_m = \
-            [], [], [], [], [], []
+        all_labels, all_computed_values, all_computed_values_e, \
+        all_num_vertices, all_masks, all_masks_e, all_ids, all_adj_m = \
+            [], [], [], [], [], [], [], []
 
         for step, batch_data in enumerate(batch_iterator):
             num_graphs = batch_data[self.placeholders['num_graphs']]
@@ -525,7 +528,8 @@ class ChemModel(object):
                           self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
                           self.ops['_am'], self.placeholders['sentences_id'], self.ops['word_inputs'],
                           self.ops['computed_values_edges'], self.placeholders['target_values_edges'],
-                          self.placeholders['node_mask_edges'], self.ops['loss_edges']
+                          self.placeholders['node_mask_edges'], self.ops['loss_edges'],
+                          self.placeholders['target_values_original']
                           ]
             if is_training:
                 #TODO: change this back to normal
@@ -564,11 +568,9 @@ class ChemModel(object):
             computed_values_edges = result[24]
             labels_edges = result[25]
             node_mask_edges = result[26]
-            loss_edges = result[26]
-
-            loss_ = result[0]
-
-            # np_loss = np.sum(-np.sum(labels * np.log(computed_values), axis = 1))
+            loss_edges = result[27]
+            labels_original = result[28]
+            set_trace()
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
             writer.add_summary(batch_summary, start_step + step)
@@ -603,13 +605,13 @@ class ChemModel(object):
 
             all_labels.append(labels)
             all_computed_values.append(computed_values)
+            all_computed_values_e.append(computed_values_edges)
             all_num_vertices.append(num_vertices)
             all_masks.append(node_mask)
+            all_masks_e.append(node_mask_edges)
             all_ids.append(sentences_id)
             all_adj_m.append(adjacency_matrix)
 
-        # if not is_training:
-        #     set_trace()
         accuracies = np.sum(accuracies, axis=0) / processed_graphs
         loss = loss / processed_graphs
         error_ratios = accuracies / chemical_accuracies[self.params["task_ids"]]
@@ -624,7 +626,7 @@ class ChemModel(object):
 
         return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas, \
                all_labels, all_computed_values, all_num_vertices, all_masks, \
-               all_ids, all_adj_m, acc_uas_e
+               all_ids, all_adj_m, all_computed_values_e, all_masks_e, acc_uas_e
 
     def train(self):
         log_to_save = []
@@ -635,7 +637,7 @@ class ChemModel(object):
         print("Average val batch size: %.2f\n" % avg_val_batch_size)
         with self.graph.as_default():
             if self.args.get('--restore') is not None:
-                _, valid_accs, _, _, steps, valid_las, valid_uas, _, _, _, _, _, _, _ = \
+                _, valid_accs, _, _, steps, valid_las, valid_uas, _, _, _, _, _, _, _, _, _ = \
                     self.run_epoch("Resumed (validation)", self.valid_data, False)
                 best_val_acc = np.sum(valid_accs)
                 best_val_acc_epoch = 0
@@ -645,7 +647,8 @@ class ChemModel(object):
             for epoch in range(1, self.params['num_epochs'] + 1):
                 print("== Epoch %i" % epoch)
                 train_loss, train_accs, train_errs, train_speed, train_steps, train_las,\
-                train_uas, train_labels, train_values, train_v, train_masks, train_ids, train_adm, train_uas_e = \
+                train_uas, train_labels, train_values, train_v, train_masks, train_ids,\
+                train_adm, train_values_e, train_masks_e, train_uas_e = \
                     self.run_epoch("epoch %i (training)" % epoch, self.train_data, True, self.train_step_id)
                 self.train_step_id += train_steps
                 accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in zip(self.params['task_ids'], train_accs)])
@@ -657,7 +660,8 @@ class ChemModel(object):
                 print("Train Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
                       (train_las*100, train_uas*100, train_uas_e*100))
                 valid_loss, valid_accs, valid_errs, valid_speed, valid_steps, valid_las, \
-                valid_uas, valid_labels, valid_values, valid_v, valid_masks, valid_ids, valid_adm, valid_uas_e = \
+                valid_uas, valid_labels, valid_values, valid_v, valid_masks, valid_ids,\
+                valid_adm, valid_values_e, valid_masks_e, valid_uas_e = \
                     self.run_epoch("epoch %i (validation)" % epoch, self.valid_data, False, self.valid_step_id)
                 self.valid_step_id += valid_steps
 
@@ -668,7 +672,7 @@ class ChemModel(object):
                                                                                                         errs_str,
                                                                                                         valid_speed))
                 print("Valid Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
-                      (valid_las*100, valid_uas*100, train_uas_e*100))
+                      (valid_las*100, valid_uas*100, valid_uas_e*100))
                 epoch_time = time.time() - total_time_start
                 log_entry = {
                     'epoch': epoch,
@@ -688,7 +692,6 @@ class ChemModel(object):
 
                 ##here look at train_las and print valid las
                 if val_acc < best_val_acc:
-
                     self.save_progress(self.best_model_file, self.train_step_id, self.valid_step_id)
                     print("  (Best epoch so far, cum. val. acc decreased to %.5f from %.5f. Saving to '%s')" % (
                         val_acc, best_val_acc, self.best_model_file))
@@ -696,24 +699,29 @@ class ChemModel(object):
                     best_val_acc_epoch = epoch
 
                     self.save_results(
-                        labels=valid_labels, values=valid_values, num_vertices=valid_v,
-                        masks=valid_masks, ids=valid_ids, adm=valid_adm, train=False)
+                        labels=train_labels, values=train_values, num_vertices=train_v,
+                        masks=train_masks, ids=train_ids, adm=train_adm, values_e=train_values_e,
+                        masks_e=train_masks_e, train=True)
 
                     self.save_results(
-                        labels=train_labels, values=train_values, num_vertices=train_v,
-                        masks=train_masks, ids=train_ids, adm=train_adm, train=True)
+                        labels=valid_labels, values=valid_values, num_vertices=valid_v,
+                        masks=valid_masks, ids=valid_ids, adm=valid_adm, values_e=valid_values_e,
+                        masks_e=valid_masks_e, train=False)
+
 
                 elif epoch - best_val_acc_epoch >= self.params['patience']:
                     print("Stopping training after %i epochs without improvement on validation accuracy." % self.params['patience'])
                     break
 
-    def save_results(self, labels, values, num_vertices, masks, ids, adm, train=False):
+    def save_results(self, labels, values, num_vertices, masks, ids, adm, values_e=None,
+                     masks_e=None, train=False):
         file_to_write = self.train_results_file if train else self.valid_results_file
         with open(file_to_write, 'w') as out_file:
             self.print_all_results_as_graph(
                 all_labels=labels, all_computed_values=values,
                 all_num_vertices=num_vertices, all_masks=masks,
-                all_ids=ids, all_adms=adm, out_file=out_file)
+                all_ids=ids, all_adms=adm, all_computed_values_e=values_e,
+                all_mask_edges=masks_e, out_file=out_file)
 
     def save_progress(self, model_path: str, train_step: int, valid_step: int) -> None:
         weights_to_save = {}
