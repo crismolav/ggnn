@@ -1096,9 +1096,12 @@ class DenseGGNNChemModel(ChemModel):
     def print_all_results_as_graph(
             self, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids=None,
             all_adms=None, all_labels_e=None, all_computed_values_e=None, all_mask_edges=None, out_file=None):
-        max_i = 8
+        max_i = 50
+        acc_las, acc_uas = 0, 0
+        processed_graphs = 0
         for i, computed_values in enumerate(all_computed_values):
-            if i == max_i:
+            num_graphs = computed_values.shape[0]
+            if i == max_i and out_file:
                 break
             computed_values_e = all_computed_values_e[i] # [b, v * e]
             labels = all_labels[i]
@@ -1109,23 +1112,36 @@ class DenseGGNNChemModel(ChemModel):
             ids = all_ids[i]
             adms = all_adms[i]  # btb : [b, e, v, v]
 
-            self.print_batch_results_as_graph(
+            las, uas = self.print_batch_results_as_graph(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, out_file=out_file)
+
+            acc_las += las * num_graphs
+            acc_uas += uas * num_graphs
+
+            processed_graphs += num_graphs
+
+        acc_las = acc_las / processed_graphs
+        acc_uas = acc_uas / processed_graphs
+
+        return acc_las, acc_uas
 
     def print_batch_results_as_graph(self, labels, computed_values, num_vertices, mask,
                                      ids=None, adms=None, labels_e=None, computed_values_e=None,
                                      mask_edges=None, out_file=None):
         if self.args['--pr'] in ['btb']:
-            self.print_batch_results_as_graph_btb(
+            acc_las, acc_uas = self.print_batch_results_as_graph_btb(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, out_file=out_file)
         else:
+            acc_las, acc_uas = 0, 0
             self.print_batch_results_as_graph_others(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, out_file=out_file)
+
+        return acc_las, acc_uas
 
     def print_batch_results_as_graph_others(self, labels, computed_values, num_vertices,
                                             mask, ids=None, out_file=None):
@@ -1165,6 +1181,9 @@ class DenseGGNNChemModel(ChemModel):
             targets=labels_e, computed_values=computed_values_e, mask=mask_edges,
             num_vertices=num_vertices, is_edge=True)
         # [b, e, v, 1]
+        acc_las = 0
+        acc_uas = 0
+        b = targets_reshaped.shape[0]
         e = self.num_edge_types
         for i, result in enumerate(results_reshaped):
             result_e = results_reshaped_e[i]
@@ -1183,13 +1202,16 @@ class DenseGGNNChemModel(ChemModel):
             result_graph = self.merge_head_and_edge_graph(result_graph_h, result_graph_e)
 
             input_graph =  adj_mat_to_target(adj_mat=adm)
+            las, uas = self.get_las_uas(target_graph, result_graph)
+            acc_las += las
+            acc_uas += uas
 
-            if out_file is None:
-                print("id %s target vs predicted: \n%s vs \n%s\n" % (
-                    id, target_graph, result_graph))
-            else:
+            if out_file:
                 out_file.write("id %s target vs predicted vs input: \n%s vs \n\n%s vs \n\n%s\n\n" % (
                     id, target_graph, result_graph, input_graph))
+        acc_las = acc_las/b
+        acc_uas = acc_uas/b
+        return acc_las, acc_uas
 
     def merge_head_and_edge_graph(self, result_graph_l, result_graph_e):
         return [[x[0], y[1]] for x, y in zip(result_graph_l, result_graph_e)]

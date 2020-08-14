@@ -575,10 +575,15 @@ class ChemModel(object):
             accuracies.append(np.array(batch_accuracies) * num_graphs)
 
             try:
-                las, uas = self.get_batch_attachment_scores(
-                    targets=labels, computed_values= computed_values,
-                    mask=node_mask, num_vertices=num_vertices,
-                    sentences_id=sentences_id, adjacency_matrix=adjacency_matrix)
+                # las, uas = self.get_batch_attachment_scores(
+                #     targets=labels, computed_values= computed_values,
+                #     mask=node_mask, num_vertices=num_vertices,
+                #     sentences_id=sentences_id, adjacency_matrix=adjacency_matrix)
+
+                las, uas = self.print_batch_results_as_graph(
+                    labels=labels, computed_values=computed_values, num_vertices=num_vertices,
+                    mask=node_mask, ids=sentences_id, adms=adjacency_matrix, labels_e=labels_edges,
+                    computed_values_e=computed_values_edges, mask_edges=node_mask_edges)
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
 
@@ -715,7 +720,7 @@ class ChemModel(object):
                      masks_e=None, train=False):
         file_to_write = self.train_results_file if train else self.valid_results_file
         with open(file_to_write, 'w') as out_file:
-            self.print_all_results_as_graph(
+            _, _ = self.print_all_results_as_graph(
                 all_labels=labels, all_computed_values=values,
                 all_num_vertices=num_vertices, all_masks=masks,
                 all_ids=ids, all_adms=adm, all_labels_e=labels_e,
