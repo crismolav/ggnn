@@ -152,6 +152,8 @@ class ChemModel(object):
         self.max_num_vertices = 0
         self.num_edge_types   = 0
         self.annotation_size  = 0
+        self.output_size_edges = 0
+
         # embedding sizes
         self.pos_embedding_size  = 50
         self.loc_embedding_size  = 80
@@ -167,10 +169,11 @@ class ChemModel(object):
         self.dep_list_out, _, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type='nivre')
 
+        self.num_edge_types = len(self.dep_list)if not self.args.get('--ym_to_std') else len(self.dep_list_out)
+        self.output_size_edges = len(self.dep_list_out) if not self.args.get('--ym_to_std') else self.num_edge_types
+
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
-        self.output_size_edges = self.num_edge_types
-
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -225,7 +228,6 @@ class ChemModel(object):
 
             num_fwd_edge_types = max(num_fwd_edge_types, max([e[1] for e in g['graph']]))
 
-        self.num_edge_types = max([len(self.dep_list), self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2)])
         self.annotation_size = self.get_annotation_size(data=data)
         self.pos_size = len(self.pos_list)
 
@@ -259,10 +261,10 @@ class ChemModel(object):
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
                 tf.float32, [self.num_edge_types, None], name='target_mask')
         elif self.args['--pr'] in ['btb']:
-            self.placeholders['target_values'] = tf.compat.v1.placeholder(
+            self.placeholders['target_values_head'] = tf.compat.v1.placeholder(
                 tf.float32, [None, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
-                tf.float32, [self.num_edge_types, None], name='target_mask')
+                tf.float32, [self.output_size_edges, None], name='target_mask')
             self.placeholders['target_values_edges'] = tf.compat.v1.placeholder(
                 tf.float32, [None, None], name='target_values')
 
@@ -324,7 +326,7 @@ class ChemModel(object):
                     mask = tf.transpose(a=self.placeholders['node_mask'])  # [e * v * o,b]
                     # ID: [e * v * o,b]
                 elif self.args['--pr'] in ['btb']:
-                    labels = self.placeholders['target_values']  # [b, v * o]
+                    labels = self.placeholders['target_values_head']  # [b, v * o]
                     mask = self.placeholders['node_mask'] #[b, v * e * o]
                     labels_edges = self.placeholders['target_values_edges']  # [b, v * e]
                     mask_edges = self.placeholders['node_mask_edges'] # [b, v * e]
@@ -363,9 +365,7 @@ class ChemModel(object):
                         masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
                         task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
 
-                    #TODO: clean unnecesary ones since they already have placeholders
                     self.ops['accuracy_task%i' % task_id] = task_loss
-                    self.ops['losses'].append(task_loss)
                     self.ops['losses'].append(task_loss)
                     self.ops['losses_edges'].append(task_loss_edges)
                     self.ops['computed_values'] = computed_values

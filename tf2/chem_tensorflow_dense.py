@@ -24,6 +24,7 @@ Options:
     --no_labels              no labels considered
     --only_labels            only labels considered
     --train_with_dev         use dev set which is smaller for training
+    --ym_to_std              train from nivre to standford
 """
 from __future__ import print_function
 from typing import Sequence, Any
@@ -567,28 +568,27 @@ class DenseGGNNChemModel(ChemModel):
         #TODO:test
         #n_active_nodes is the real number of vertices in the sentence
         if self.args['--pr'] in ['identity', 'btb']:
-            e = self.num_edge_types
+            e_o = self.output_size_edges
             v = chosen_bucket_size
             o = self.params['output_size']
-            mask = np.ones((e, n_active_nodes))  # [e, v']
+            mask = np.ones((e_o, n_active_nodes))  # [e_o, v']
             if chosen_bucket_size - n_active_nodes>0:
-                mask_zero = np.zeros((e, v - n_active_nodes))
-                mask = np.concatenate([mask, mask_zero], axis =-1) # [e, v]
+                mask_zero = np.zeros((e_o, v - n_active_nodes))
+                mask = np.concatenate([mask, mask_zero], axis =-1) # [e_o, v]
             if is_edge:
-                final_mask = np.transpose(mask) # [v, e]
-                final_mask = np.reshape(final_mask, [-1]) # [v * e]
+                final_mask = np.transpose(mask) # [v, e_o]
+                final_mask = np.reshape(final_mask, [-1]) # [v * e_o]
                 return final_mask
-            final_mask = np.reshape(mask, [-1,1]) # [e * v, 1]
-            final_mask = np.tile(final_mask, [1, n_active_nodes]) # (e * v, v')
+            final_mask = np.reshape(mask, [-1,1]) # [e_o * v, 1]
+            final_mask = np.tile(final_mask, [1, n_active_nodes]) # (e_o * v, v')
             output_zeros = np.zeros((final_mask.shape[0], o - n_active_nodes))
-            final_mask = np.concatenate([final_mask, output_zeros], axis=-1) # (e * v, o)
+            final_mask = np.concatenate([final_mask, output_zeros], axis=-1) # (e_o * v, o)
 
             if self.args['--pr'] in ['btb']:
-                final_mask = np.reshape(final_mask, [e, v, o]) # BTB [e, v, o]
-                final_mask = np.transpose(final_mask, [1, 0, 2]) # BTB [v, e, o]
+                final_mask = np.reshape(final_mask, [e_o, v, o]) # BTB [e_o, v, o]
+                final_mask = np.transpose(final_mask, [1, 0, 2]) # BTB [v, e_o, o]
 
-                if self.args.get('--no_labels') or self.args.get('--only_labels'):
-                    final_mask = np.mean(final_mask, axis=1)
+                final_mask = np.mean(final_mask, axis=1)
                 final_mask = np.reshape(final_mask, [-1])
 
             return final_mask  # BTB [v * o] ID [e * v, o]
@@ -619,7 +619,7 @@ class DenseGGNNChemModel(ChemModel):
         elif self.args['--pr'] == 'btb':
             return target_to_adj_mat(
                 target=data_dict["targets"], max_n_vertices=chosen_bucket_size,
-                num_edge_types=self.num_edge_types, output_size=chosen_bucket_size,
+                num_edge_types=self.output_size_edges, output_size=chosen_bucket_size,
                 tie_fwd_bkwd=self.params['tie_fwd_bkwd'])
             # [e, v', v]
         elif self.args['--pr'] == 'molecule':
@@ -775,7 +775,7 @@ class DenseGGNNChemModel(ChemModel):
                                     head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
             # [b, v, 6]
             batch_feed_dict = {
-                self.placeholders['target_values']: target_values,
+                self.placeholders['target_values_head']: target_values,
                 #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
                 self.placeholders['target_values_edges']: target_values_edges,
                 # [b, v * e]
@@ -979,7 +979,7 @@ class DenseGGNNChemModel(ChemModel):
             return mask_reshaped, results_reshaped, targets_reshaped
 
         elif self.args['--pr'] in ['btb']:
-            e, v = self.num_edge_types, num_vertices
+            e, v = self.output_size_edges, num_vertices
             # e_ = 1 if self.args.get('--no_labels') else e
             o = self.params['output_size']
 
@@ -1087,7 +1087,6 @@ class DenseGGNNChemModel(ChemModel):
     def humanize_batch_results_btb(self, labels, computed_values, num_vertices,
                                          mask, ids=None, adms=None, labels_e=None,
                                          computed_values_e=None, mask_edges=None, out_file=None):
-        e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
 
         _, results_reshaped, targets_reshaped = self.get_results_reshaped(
             targets=labels, computed_values=computed_values, mask=mask,
