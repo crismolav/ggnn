@@ -324,8 +324,8 @@ class ChemModel(object):
                     mask = tf.transpose(a=self.placeholders['node_mask'])  # [e * v * o,b]
                     # ID: [e * v * o,b]
                 elif self.args['--pr'] in ['btb']:
-                    labels = self.placeholders['target_values']  # [b, v * e * o]
-                    mask = self.placeholders['node_mask'] #[b, v * e * o_]
+                    labels = self.placeholders['target_values']  # [b, v * o]
+                    mask = self.placeholders['node_mask'] #[b, v * e * o]
                     labels_edges = self.placeholders['target_values_edges']  # [b, v * e]
                     mask_edges = self.placeholders['node_mask_edges'] # [b, v * e]
                 else:
@@ -514,23 +514,27 @@ class ChemModel(object):
         for step, batch_data in enumerate(batch_iterator):
             num_graphs = batch_data[self.placeholders['num_graphs']]
             processed_graphs += num_graphs
+            fetch_list_names = ['loss', 'accuracy_ops', 'summary',
+                                'loss_edges', 'labels', 'computed_values',
+                                'final_node_representations','node_mask',
+                                'losses','edge_weights', 'edge_biases',
+                                'num_vertices', 'adjacency_matrix',
+                                'sentences_id', 'word_inputs',
+                                'computed_values_edges', 'labels_edges',
+                                'node_mask_edges', 'word_embeddings']
+
             fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
-                          self.ops['labels'], self.ops['computed_values'],
-                          self.ops['final_node_representations'],
-                          self.ops['node_mask'], self.ops['losses'],
-                          self.placeholders['initial_node_representation'],
-                          self.weights['edge_weights'], self.weights['edge_biases'],
-                          self.weights['regression_transform_task%i' % 0].params['weights'],
-                          self.placeholders['num_vertices'], self.ops['acts'],
-                          self.ops['m'], self.placeholders['adjacency_matrix'],
-                          self.ops['edge_weights'], self.ops['h'], self.ops['h_gru'],
-                          self.placeholders['edge_weight_dropout_keep_prob'], self.ops['m1'],
-                          self.ops['_am'], self.placeholders['sentences_id'], self.ops['word_inputs'],
+                          self.ops['loss_edges'],self.ops['labels'], self.ops['computed_values'],
+                          self.ops['final_node_representations'], self.ops['node_mask'],
+                          self.ops['losses'], self.weights['edge_weights'], self.weights['edge_biases'],
+                          self.placeholders['num_vertices'], self.placeholders['adjacency_matrix'],
+                          self.placeholders['sentences_id'], self.ops['word_inputs'],
                           self.ops['computed_values_edges'], self.placeholders['target_values_edges'],
-                          self.placeholders['node_mask_edges'], self.ops['loss_edges'],
+                          self.placeholders['node_mask_edges'], self.weights['word_embeddings']
                           ]
+
+            index_d = {fetch_list_names[i]: i for i in range(len(fetch_list_names))}
             if is_training:
-                #TODO: change this back to normal
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = self.params['out_layer_dropout_keep_prob']
                 fetch_list.append(self.ops['train_step'])
 
@@ -542,31 +546,21 @@ class ChemModel(object):
             result = self.sess.run(fetch_list, feed_dict=batch_data)
             #TODO: delete
 
-            labels = result[3]
-            computed_values = result[4]
-            final_node_representations = result[5]
-            node_mask = result[6]
-
-            initial_node_representation = result[8]
-            edge_weights = result[9]
-            edge_biases = result[10]
-            regression_transform_task = result[11]
-            num_vertices = result[12]
-            acts = result[13]
-            mm = result[14]
-            adjacency_matrix = result[15]
-            edge_weights_ops = result[16]
-            hh = result[17]
-            h_gru = result[18]
-            edge_weight_dkp = result[19]
-            m1 = result[20]
-            # _am = result[21]
-            sentences_id = result[22]
-            word_inputs = result[23]
-            computed_values_edges = result[24]
-            labels_edges = result[25]
-            node_mask_edges = result[26]
-            loss_edges = result[27]
+            loss_edges = result[index_d['loss_edges']]
+            labels = result[index_d['labels']]
+            computed_values = result[index_d['computed_values']]
+            final_node_representations = result[index_d['final_node_representations']]
+            node_mask = result[index_d['node_mask']]
+            edge_weights = result[index_d['edge_weights']]
+            edge_biases = result[index_d['edge_biases']]
+            num_vertices = result[index_d['num_vertices']]
+            adjacency_matrix = result[index_d['adjacency_matrix']]
+            sentences_id = result[index_d['sentences_id']]
+            word_inputs = result[index_d['word_inputs']]
+            computed_values_edges = result[index_d['computed_values_edges']]
+            labels_edges = result[index_d['labels_edges']]
+            node_mask_edges = result[index_d['node_mask_edges']]
+            word_embeddings = result[index_d['word_embeddings']]
 
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             writer = self.train_writer if is_training else self.valid_writer
@@ -575,24 +569,14 @@ class ChemModel(object):
             accuracies.append(np.array(batch_accuracies) * num_graphs)
 
             try:
-                # las, uas = self.get_batch_attachment_scores(
-                #     targets=labels, computed_values= computed_values,
-                #     mask=node_mask, num_vertices=num_vertices,
-                #     sentences_id=sentences_id, adjacency_matrix=adjacency_matrix)
-
-                las, uas = self.print_batch_results_as_graph(
+                las, uas, uas_e = self.humanize_batch_results(
                     labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                     mask=node_mask, ids=sentences_id, adms=adjacency_matrix, labels_e=labels_edges,
                     computed_values_e=computed_values_edges, mask_edges=node_mask_edges)
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
-
-                las_e, uas_e = self.get_batch_attachment_scores_edges(
-                    targets=labels_edges, computed_values=computed_values_edges,
-                    mask=node_mask_edges, num_vertices=num_vertices,
-                    sentences_id=sentences_id, adjacency_matrix=adjacency_matrix)
-
                 acc_uas_e += uas_e * num_graphs
+
             except:
                 print('edge weights: %s'%edge_weights)
                 print('edge bias: %s'%edge_biases)
@@ -720,7 +704,7 @@ class ChemModel(object):
                      masks_e=None, train=False):
         file_to_write = self.train_results_file if train else self.valid_results_file
         with open(file_to_write, 'w') as out_file:
-            _, _ = self.print_all_results_as_graph(
+            _, _, _ = self.humanize_all_results(
                 all_labels=labels, all_computed_values=values,
                 all_num_vertices=num_vertices, all_masks=masks,
                 all_ids=ids, all_adms=adm, all_labels_e=labels_e,

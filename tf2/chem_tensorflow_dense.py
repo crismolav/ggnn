@@ -157,13 +157,13 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['edge_weight_dropout_keep_prob'] = tf.compat.v1.placeholder(tf.float32, None, name='edge_weight_dropout_keep_prob')
         self.placeholders['emb_dropout_keep_prob'] = tf.compat.v1.placeholder(tf.float32, [],
                                                                               name='emb_dropout_keep_prob')
-        #TODO: change this
-        if self.args['--pr'] in ['identity']:
-            self.placeholders['initial_node_representation'] = tf.compat.v1.placeholder(
-                tf.float32, [self.num_edge_types, None, None, self.params['hidden_size']],name='node_features')
-        else:
-            self.placeholders['initial_node_representation'] = tf.compat.v1.placeholder(
-                tf.float32, [None, None, self.params['hidden_size']], name='node_features')
+        if self.args['--pr'] not in  ['btb']:
+            if self.args['--pr'] in ['identity']:
+                self.placeholders['initial_node_representation'] = tf.compat.v1.placeholder(
+                    tf.float32, [self.num_edge_types, None, None, self.params['hidden_size']],name='node_features')
+            else:
+                self.placeholders['initial_node_representation'] = tf.compat.v1.placeholder(
+                    tf.float32, [None, None, self.params['hidden_size']], name='node_features')
 
         self.placeholders['node_mask'] = tf.compat.v1.placeholder(
             tf.float32, [None, None], name='node_mask')
@@ -775,8 +775,6 @@ class DenseGGNNChemModel(ChemModel):
                                     head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
             # [b, v, 6]
             batch_feed_dict = {
-                self.placeholders['initial_node_representation']: initial_representations,
-                # ID: [e, b, v, h] else [b, v, h]
                 self.placeholders['target_values']: target_values,
                 #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
                 self.placeholders['target_values_edges']: target_values_edges,
@@ -798,8 +796,11 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['word_inputs']: word_inputs
                 # [b, v, 2]
             }
+            if self.args['--pr'] not in ['btb']:
+                batch_feed_dict[self.placeholders['initial_node_representation']] = initial_representations,
+                # ID: [e, b, v, h] else [b, v, h]
             bucket_counters[bucket] += 1
-            iteration = step
+
             avg_num += num_graphs
 
             yield batch_feed_dict
@@ -833,11 +834,10 @@ class DenseGGNNChemModel(ChemModel):
                                 pad_width=[[0, 0], [0, 0], [0, 0], [0, o - v]],
                                 mode='constant')  # BTB [b, v', e, o]
 
-            if no_labels:
-                new_labels = np.sum(new_labels, axis=2) # BTB [b, v', o]
-                e = 1
 
-            new_labels = np.reshape(new_labels, [b, v * e * o])   # BTB [b, v * e * o] [b, v * 1 * o]
+            new_labels = np.sum(new_labels, axis=2) # BTB [b, v', o]
+            new_labels = np.reshape(new_labels, [b, v * o])   # [b, v * o]
+
             return new_labels
         else:
             return np.transpose(np.array(labels))
@@ -965,91 +965,6 @@ class DenseGGNNChemModel(ChemModel):
             print("target vs predicted: %d vs %.0f for sentence :'%s'" % (
                 target.index(1), np.argmax(result), sentence[:50]))
 
-
-    def get_batch_attachment_scores(self, targets, computed_values, mask,
-                                    num_vertices, sentences_id, adjacency_matrix=None):
-        if self.args['--pr'] not in ['identity', 'btb']:
-            return 0, 0
-        else:
-            return self.get_batch_attachment_scores_(
-                targets=targets, computed_values=computed_values,
-                mask=mask, num_vertices=num_vertices, sentences_id=sentences_id,
-                adjacency_matrix=adjacency_matrix)
-
-    def get_batch_attachment_scores_(self, targets, computed_values, mask, num_vertices,
-                                       sentences_id, adjacency_matrix=None):
-        # mask  [b,  e * v * o]
-        # computed_values  [b, v * e * o_] [e * v * o, b]
-        # target = [b, v * e * o_] labels [e * v * o, b]
-        mask_reshaped, results_reshaped, targets_reshaped = self.get_results_reshaped(
-            targets=targets, computed_values=computed_values, mask=mask,
-            num_vertices=num_vertices)
-        #BTB [b, e, v, o_]
-        acc_las = 0
-        acc_uas = 0
-        b = targets_reshaped.shape[0]
-
-        for i, result in enumerate(results_reshaped):
-            target = targets_reshaped[i] # [e, v, o_]
-            adj_m = adjacency_matrix[i] # [e, v', v]
-            input_matrix = np.sum(adj_m, axis=0)
-            input_matrix = np.reshape(input_matrix, [1, input_matrix.shape[0], input_matrix.shape[1]])
-
-            target_graph = adj_mat_to_target(adj_mat=target)
-            input_graph = adj_mat_to_target(adj_mat=input_matrix)
-            result_graph = adj_mat_to_target(
-                adj_mat=result, is_probability=True, true_target=target_graph)
-            las, uas = self.get_las_uas(target_graph, result_graph)
-
-            acc_las += las
-            acc_uas += uas
-
-        return acc_las/b, acc_uas/b
-
-    def get_batch_attachment_scores_edges(self, targets, computed_values, mask,
-                                    num_vertices, sentences_id, adjacency_matrix=None):
-        if self.args['--pr'] not in ['identity', 'btb']:
-            return 0, 0
-        else:
-            return self.get_batch_attachment_scores_edges_(
-                targets=targets, computed_values=computed_values,
-                mask=mask, num_vertices=num_vertices, sentences_id=sentences_id,
-                adjacency_matrix=adjacency_matrix)
-
-    def get_batch_attachment_scores_edges_(self, targets, computed_values, mask, num_vertices,
-                                       sentences_id, adjacency_matrix=None):
-        # mask  [b, v * e]
-        # computed_values  [b, v * e]
-        # target = [b, v * e]
-        _, results_reshaped, targets_reshaped = self.get_results_reshaped(
-            targets=targets, computed_values=computed_values, mask=mask,
-            num_vertices=num_vertices, is_edge=True)
-        #BTB [b, e, v, 1]
-        acc_las = 0
-        acc_uas = 0
-        b = targets_reshaped.shape[0]
-        e = self.num_edge_types
-        for i, result in enumerate(results_reshaped):
-            target = targets_reshaped[i] # [e, v', 1]
-            adj_m = adjacency_matrix[i] # [2*e, v', v]
-            input_adj_m = adjacency_matrix[i][:e, :, :] # [e, v', v]
-            input_matrix = np.sum(input_adj_m, axis=2) # [e, v']
-            input_matrix = np.reshape(input_matrix, [e, input_matrix.shape[1], 1]) # [e, v', 1]
-
-            target_graph = adj_mat_to_target(adj_mat=target)
-            input_graph = adj_mat_to_target(adj_mat=input_matrix)
-            result_graph = adj_mat_to_target(
-                adj_mat=result, is_probability=True, true_target=target_graph)
-            las, uas = self.get_las_uas(target_graph, result_graph, is_edge=True)
-
-            acc_las += las
-            acc_uas += uas
-
-        acc_las = acc_las/b
-        acc_uas = acc_uas/b
-
-        return acc_las, acc_uas
-
     def get_results_reshaped(self, targets, computed_values, mask, num_vertices, is_edge=False):
         if self.args['--pr'] in ['identity']:
             e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
@@ -1093,11 +1008,11 @@ class DenseGGNNChemModel(ChemModel):
 
 
 
-    def print_all_results_as_graph(
+    def humanize_all_results(
             self, all_labels, all_computed_values, all_num_vertices, all_masks, all_ids=None,
             all_adms=None, all_labels_e=None, all_computed_values_e=None, all_mask_edges=None, out_file=None):
         max_i = 50
-        acc_las, acc_uas = 0, 0
+        acc_las, acc_uas, acc_uas_e = 0, 0, 0
         processed_graphs = 0
         for i, computed_values in enumerate(all_computed_values):
             num_graphs = computed_values.shape[0]
@@ -1112,38 +1027,40 @@ class DenseGGNNChemModel(ChemModel):
             ids = all_ids[i]
             adms = all_adms[i]  # btb : [b, e, v, v]
 
-            las, uas = self.print_batch_results_as_graph(
+            las, uas, uas_e = self.humanize_batch_results(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, out_file=out_file)
 
-            acc_las += las * num_graphs
-            acc_uas += uas * num_graphs
+            acc_las   += las * num_graphs
+            acc_uas   += uas * num_graphs
+            acc_uas_e += uas_e * num_graphs
 
             processed_graphs += num_graphs
 
         acc_las = acc_las / processed_graphs
         acc_uas = acc_uas / processed_graphs
+        acc_uas_e = acc_uas_e / processed_graphs
 
-        return acc_las, acc_uas
+        return acc_las, acc_uas, acc_uas_e
 
-    def print_batch_results_as_graph(self, labels, computed_values, num_vertices, mask,
+    def humanize_batch_results(self, labels, computed_values, num_vertices, mask,
                                      ids=None, adms=None, labels_e=None, computed_values_e=None,
                                      mask_edges=None, out_file=None):
         if self.args['--pr'] in ['btb']:
-            acc_las, acc_uas = self.print_batch_results_as_graph_btb(
+            acc_las, acc_uas, acc_uas_e = self.humanize_batch_results_btb(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, out_file=out_file)
         else:
-            acc_las, acc_uas = 0, 0
-            self.print_batch_results_as_graph_others(
+            acc_las, acc_uas, acc_uas_e = 0, 0, 0
+            self.humanize_batch_results_others(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, out_file=out_file)
 
-        return acc_las, acc_uas
+        return acc_las, acc_uas, acc_uas_e
 
-    def print_batch_results_as_graph_others(self, labels, computed_values, num_vertices,
+    def humanize_batch_results_others(self, labels, computed_values, num_vertices,
                                             mask, ids=None, out_file=None):
         e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
         e_ = 1 if self.args.get('--no_labels') else e
@@ -1167,7 +1084,7 @@ class DenseGGNNChemModel(ChemModel):
                 out_file.write("id %s target vs predicted: \n%s vs \n%s\n" % (
                 id, target_graph, result_graph))
 
-    def print_batch_results_as_graph_btb(self, labels, computed_values, num_vertices,
+    def humanize_batch_results_btb(self, labels, computed_values, num_vertices,
                                          mask, ids=None, adms=None, labels_e=None,
                                          computed_values_e=None, mask_edges=None, out_file=None):
         e, v, o = self.num_edge_types, num_vertices, self.params['output_size']
@@ -1183,6 +1100,7 @@ class DenseGGNNChemModel(ChemModel):
         # [b, e, v, 1]
         acc_las = 0
         acc_uas = 0
+        acc_uas_e = 0
         b = targets_reshaped.shape[0]
         e = self.num_edge_types
         for i, result in enumerate(results_reshaped):
@@ -1203,18 +1121,46 @@ class DenseGGNNChemModel(ChemModel):
 
             input_graph =  adj_mat_to_target(adj_mat=adm)
             las, uas = self.get_las_uas(target_graph, result_graph)
+            _, uas_e = self.get_las_uas(target_graph_e, result_graph_e, is_edge=True)
+
             acc_las += las
             acc_uas += uas
+            acc_uas_e += uas_e
 
             if out_file:
-                out_file.write("id %s target vs predicted vs input: \n%s vs \n\n%s vs \n\n%s\n\n" % (
-                    id, target_graph, result_graph, input_graph))
+                # out_file.write("id %s target vs predicted vs input: \n%s vs \n\n%s vs \n\n%s\n\n" % (
+                #     id, target_graph, result_graph, input_graph))
+                self.write_to_file(id, target_graph, result_graph, input_graph, out_file=out_file)
         acc_las = acc_las/b
         acc_uas = acc_uas/b
-        return acc_las, acc_uas
+        acc_uas_e = acc_uas_e/b
+
+        return acc_las, acc_uas, acc_uas_e
 
     def merge_head_and_edge_graph(self, result_graph_l, result_graph_e):
         return [[x[0], y[1]] for x, y in zip(result_graph_l, result_graph_e)]
+
+    def write_to_file(self, id, target_graph, result_graph, input_graph, out_file):
+        str_line = ''
+        for i, r_edge in enumerate(result_graph):
+            t_edge = target_graph[i]
+            i_edge = input_graph[i]
+            r_edge_f = self.get_edge_formatted(t_edge, r_edge)
+            str_edge = "[%s, %s, %s]"%(str(t_edge), r_edge_f, str(i_edge))
+            if i != len(result_graph) -1:
+                str_edge += ' ,'
+            str_line += str_edge
+
+        out_file.write("id %s target vs predicted vs input: \n%s\n\n" % (
+            id, str_line))
+
+    def get_edge_formatted(self, t_edge, r_edge):
+        r_head, r_label = r_edge
+        t_head, t_label = t_edge
+        head_prefix  = '*' if r_head != t_head else ''
+        label_prefix = '*' if r_label != t_label else ''
+
+        return "[%s%d, %s%d]"%(head_prefix, r_head, label_prefix, r_label)
 
     @staticmethod
     def get_las_uas(target_graph, result_graph, is_edge=False):
