@@ -175,7 +175,7 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
         self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
-            tf.int32, [None, None, 6], name='word_inputs')
+            tf.int32, [None, None, 7], name='word_inputs')
         # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
             tf.float32, [None, 2 * self.num_edge_types, None, None], name='adjacency_matrix')
@@ -200,11 +200,14 @@ class DenseGGNNChemModel(ChemModel):
             dtype=tf.float32)
 
         self.weights['pos_embeddings'] = tf.compat.v1.get_variable(
-            'pos_embedding', [self.pos_size, self.pos_embedding_size],
+            'pos_embeddings', [self.pos_size, self.pos_embedding_size],
             dtype=tf.float32)
         self.weights['word_embeddings'] = tf.compat.v1.get_variable(
-            'word_embedding', [self.vocab_size, self.word_embedding_size],
+            'word_embeddings', [self.vocab_size, self.word_embedding_size],
             dtype=tf.float32)
+        # self.weights['head_word_embeddings'] = tf.compat.v1.get_variable(
+        #     'head_word_embeddings', [self.vocab_size, self.word_embedding_size],
+        #     dtype=tf.float32)
 
         #+1 because num_edge_types doesnt include arbitrary 0 edge type
         self.weights['edge_embeddings'] = tf.compat.v1.get_variable(
@@ -241,14 +244,18 @@ class DenseGGNNChemModel(ChemModel):
             head_pos_inputs = tf.nn.dropout(head_pos_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # not used didn't seem useful
             # BTB: [b, v, p_em]
-
             edges_inputs = tf.nn.embedding_lookup(
                 self.weights['edge_embeddings'], word_inputs[:, :, 5])
             edges_inputs = tf.nn.dropout(edges_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, e_em]
+            head_word_index_inputs = tf.nn.embedding_lookup(
+                self.weights['word_embeddings'], word_inputs[:, :, 6])
+            head_word_index_inputs = tf.nn.dropout(head_word_index_inputs,
+                                              1 - (self.placeholders['emb_dropout_keep_prob']))
+            # BTB: [b, v, w_em]
 
             word_inputs = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
+                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs, head_word_index_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]])
             # BTB: [b, v, h]
@@ -487,6 +494,7 @@ class DenseGGNNChemModel(ChemModel):
                 'words_index': d["words_index"],
                 'words_head': words_head,
                 'words_head_pos': [d["node_features"][x] for x in words_head],
+                'head_word_index': [d["words_index"][x] for x in words_head],
                 'edges_index': edges_index
             }
             bucketed[chosen_bucket_idx].append(bucketed_dict)
@@ -670,7 +678,8 @@ class DenseGGNNChemModel(ChemModel):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
                       'node_mask_edges': [], 'task_masks': [], 'sentences_id': [],
                       'words_pos':[], 'words_loc':[], 'words_index': [],
-                      'words_head': [], 'words_head_pos': [], 'edges_index': []}
+                      'words_head': [], 'words_head_pos': [], 'edges_index': [],
+                      'head_word_index':[]}
         for d in elements:
             dd = d
             batch_data['adj_mat'].append(d['adj_mat'])
@@ -685,6 +694,7 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['words_head'].append(d['words_head'])
             batch_data['words_head_pos'].append(d['words_head_pos'])
             batch_data['edges_index'].append(d['edges_index'])
+            batch_data['head_word_index'].append(d['head_word_index'])
 
             target_task_values = []
             target_task_mask = []
@@ -768,12 +778,16 @@ class DenseGGNNChemModel(ChemModel):
                 words_pos=batch_data['words_head'], b=num_graphs, v=bucket_sizes[bucket])
             head_pos_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_head_pos'], b=num_graphs, v=bucket_sizes[bucket])
+            head_word_id_inputs = self.get_word_inputs_padded(
+                words_pos=batch_data['head_word_index'], b=num_graphs, v=bucket_sizes[bucket])
             edges_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['edges_index'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
+
             word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
-                                    head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
-            # [b, v, 6]
+                                    head_loc_inputs, head_pos_inputs, edges_inputs,
+                                    head_word_id_inputs), axis=2)
+            # [b, v, 7]
             batch_feed_dict = {
                 self.placeholders['target_values_head']: target_values,
                 #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
