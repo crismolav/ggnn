@@ -7,9 +7,9 @@
 # Number of GPUs per node
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=10G
+#SBATCH --mem=100G
 
 export PATH="$HOME/project/anaconda3/bin:$PATH"
 source activate tfgpu
 cd /homedtic/cmorales/cmol/ggnn
-python tf2/chem_tensorflow_dense.py --log_dir borrar $1 $2 $3 $4 $5 $6 $7 $8
+python tf2/chem_tensorflow_dense.py --log_dir borrar $1 $2 $3 $4 $5 $6 $7 $8 $9 ${10}

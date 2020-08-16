@@ -24,7 +24,7 @@ Options:
     --no_labels              no labels considered
     --only_labels            only labels considered
     --train_with_dev         use dev set which is smaller for training
-    --ym_to_std              train from nivre to standford
+    --input_tree_bank NAME   tree bank to use as input either std or nivre
 """
 from __future__ import print_function
 from typing import Sequence, Any
