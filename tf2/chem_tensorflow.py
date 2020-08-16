@@ -33,15 +33,24 @@ def get_train_and_validation_files(args):
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
     elif args.get('--pr') == 'btb':
-
         if args.get('--train_with_dev'):
-            train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json'
-            valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json' if not args.get(
-                '--test_with_train') else train_file
+            if args.get('--input_tree_bank') == 'nivre':
+                train_file = 'en-wsj-ym-nivre-dev_btb.json'
+                valid_file = 'en-wsj-ym-nivre-test_btb.json' if not args.get(
+                    '--test_with_train') else train_file
+            else:
+                train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json'
+                valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json' if not args.get(
+                    '--test_with_train') else train_file
         else:
-            train_file = 'en-wsj-std-train-stanford-3.3.0_btb.json'
-            valid_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json' if not args.get(
-                '--test_with_train') else train_file
+            if args.get('--input_tree_bank') == 'nivre':
+                train_file = 'en-wsj-ym-nivre-train_btb.json'
+                valid_file = 'en-wsj-ym-nivre-dev_btb.json' if not args.get(
+                    '--test_with_train') else train_file
+            else:
+                train_file = 'en-wsj-std-train-stanford-3.3.0_btb.json'
+                valid_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_btb.json' if not args.get(
+                    '--test_with_train') else train_file
 
     elif args.get('--pr') == 'molecule':
         train_file = 'molecules_train.json'
@@ -64,7 +73,9 @@ class ChemModel(object):
             output_size = 150
         else:
             output_size = 1
-
+        input_tree_bank = self.args.get("--input_tree_bank") if self.args.get(
+            "--input_tree_bank") is not None else 'std'
+        assert input_tree_bank in ['nivre', 'std']
         return {
             'batch_size': 20,
             'num_epochs': 200,
@@ -86,6 +97,8 @@ class ChemModel(object):
             'valid_file': valid_file,
             'restrict': self.args.get("--restrict_data"),
             'output_size': output_size,
+            'input_tree_bank': input_tree_bank,
+            'output_tree_bank': 'nivre' if input_tree_bank == 'std' else 'std'
         }
 
     def get_id_sample_params(self):
@@ -161,16 +174,16 @@ class ChemModel(object):
         self.edge_embedding_size = 50
 
         self.dep_list, self.pos_list, _, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
-            bank_type='std')
+            bank_type=self.params['input_tree_bank'])
         bucket_sizes = self.get_bucket_sizes()
         bucket_max_nodes_index = np.argmax(bucket_sizes > self.max_nodes)
         self.bucket_max_nodes = bucket_sizes[bucket_max_nodes_index]
 
         self.dep_list_out, _, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
-            bank_type='nivre')
+            bank_type=self.params['output_tree_bank'])
 
-        self.num_edge_types = len(self.dep_list)if not self.args.get('--ym_to_std') else len(self.dep_list_out)
-        self.output_size_edges = len(self.dep_list_out) if not self.args.get('--ym_to_std') else self.num_edge_types
+        self.num_edge_types = len(self.dep_list)
+        self.output_size_edges = len(self.dep_list_out)
 
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
@@ -290,7 +303,7 @@ class ChemModel(object):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [200],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
