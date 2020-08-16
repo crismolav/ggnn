@@ -308,7 +308,7 @@ class ChemModel(object):
                     self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [400],
+                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_transform_task_edges%i' % task_id] = MLP(self.params['hidden_size'], self.output_size_edges, [],
                                                                                       self.placeholders['out_layer_dropout_keep_prob'])
