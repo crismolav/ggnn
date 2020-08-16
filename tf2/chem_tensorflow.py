@@ -75,7 +75,6 @@ class ChemModel(object):
             output_size = 1
         input_tree_bank = self.args.get("--input_tree_bank") if self.args.get(
             "--input_tree_bank") is not None else 'std'
-        print("input_tree_bank: %s"%input_tree_bank)
         assert input_tree_bank in ['nivre', 'std']
         return {
             'batch_size': 20,
