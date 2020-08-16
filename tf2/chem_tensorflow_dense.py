@@ -205,9 +205,9 @@ class DenseGGNNChemModel(ChemModel):
         self.weights['word_embeddings'] = tf.compat.v1.get_variable(
             'word_embeddings', [self.vocab_size, self.word_embedding_size],
             dtype=tf.float32)
-        # self.weights['head_word_embeddings'] = tf.compat.v1.get_variable(
-        #     'head_word_embeddings', [self.vocab_size, self.word_embedding_size],
-        #     dtype=tf.float32)
+        self.weights['head_word_embeddings'] = tf.compat.v1.get_variable(
+            'head_word_embeddings', [self.vocab_size, self.word_embedding_size],
+            dtype=tf.float32)
 
         #+1 because num_edge_types doesnt include arbitrary 0 edge type
         self.weights['edge_embeddings'] = tf.compat.v1.get_variable(
@@ -249,7 +249,7 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = tf.nn.dropout(edges_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, e_em]
             head_word_index_inputs = tf.nn.embedding_lookup(
-                self.weights['word_embeddings'], word_inputs[:, :, 6])
+                self.weights['head_word_embeddings'], word_inputs[:, :, 6])
             head_word_index_inputs = tf.nn.dropout(head_word_index_inputs,
                                               1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, w_em]
