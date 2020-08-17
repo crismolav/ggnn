@@ -85,7 +85,7 @@ class ChemModel(object):
             'out_layer_dropout_keep_prob': 0.80,
             'emb_dropout_keep_prob': 0.6,
             'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
-            'num_timesteps': 8,
+            'num_timesteps': 4,
             'use_graph': True,
 
             'tie_fwd_bkwd': True,
@@ -735,7 +735,6 @@ class ChemModel(object):
             "train_step": train_step,
             "valid_step": valid_step,
         }
-
         with open(model_path, 'wb') as out_file:
             pickle.dump(data_to_save, out_file, pickle.HIGHEST_PROTOCOL)
 
