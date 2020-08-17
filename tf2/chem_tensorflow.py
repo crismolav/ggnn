@@ -58,6 +58,12 @@ def get_train_and_validation_files(args):
 
     return train_file, valid_file
 
+def get_test_file(args):
+    if args.get('--input_tree_bank') == 'nivre':
+        return 'en-wsj-ym-nivre-test_btb.json'
+    else:
+        return 'en-wsj-std-test-stanford-3.3.0-tagged_btb.json'
+
 class ChemModel(object):
     # @classmethod
     def default_params(self):
@@ -69,6 +75,7 @@ class ChemModel(object):
 
     def get_id_params(self):
         train_file, valid_file = get_train_and_validation_files(self.args)
+        test_file = get_test_file(self.args)
         if self.args['--pr'] in ['identity', 'btb']:
             output_size = 150
         else:
@@ -95,10 +102,12 @@ class ChemModel(object):
 
             'train_file': train_file,
             'valid_file': valid_file,
+            'test_file': test_file,
             'restrict': self.args.get("--restrict_data"),
             'output_size': output_size,
             'input_tree_bank': input_tree_bank,
-            'output_tree_bank': 'nivre' if input_tree_bank == 'std' else 'std'
+            'output_tree_bank': 'nivre' if input_tree_bank == 'std' else 'std',
+            'is_test':True if self.args['--evaluate'] else False
         }
 
     def get_id_sample_params(self):
@@ -187,6 +196,9 @@ class ChemModel(object):
 
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
+        if self.params.get('is_test'):
+            self.test_data = self.load_data(params['test_file'], is_training_data=False)
+
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -750,13 +762,14 @@ class ChemModel(object):
             data_to_load = pickle.load(in_file)
 
         # Assert that we got the same model configuration
-        assert len(self.params) == len(data_to_load['params'])
+        #TODO: what to do with this
+        # assert len(self.params) == len(data_to_load['params'])
         for (par, par_value) in self.params.items():
             if self.args.get('--test_with_train') and par == 'valid_file':
                 continue
-            # Fine to have different task_ids:
-            if par not in ['task_ids', 'num_epochs']:
+            if par in ['train_file']:
                 assert par_value == data_to_load['params'][par]
+
 
 
         variables_to_initialize = []

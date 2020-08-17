@@ -856,7 +856,7 @@ class DenseGGNNChemModel(ChemModel):
         return new_label
 
     def evaluate_one_batch(self, initial_node_representations, adjacency_matrices,
-                           node_masks=None, softmax_mask=None):
+                           node_masks=None):
         num_vertices = len(initial_node_representations[0])
 
         if node_masks is None:
@@ -865,13 +865,10 @@ class DenseGGNNChemModel(ChemModel):
                 node_masks.append([1. for _ in r] + [0. for _ in range(num_vertices - len(r))])
 
         batch_feed_dict = {
-            self.placeholders['initial_node_representation']: self.pad_annotations(
-                initial_node_representations, chosen_bucket_size=num_vertices, adj_mat=np.array(adjacency_matrices)),
             self.placeholders['num_graphs']: len(initial_node_representations),
             self.placeholders['num_vertices']: len(initial_node_representations[0]),
             self.placeholders['adjacency_matrix']: adjacency_matrices,
             self.placeholders['node_mask']: node_masks,
-            self.placeholders['softmax_mask']: softmax_mask,
             self.placeholders['graph_state_keep_prob']: 1.0,
             self.placeholders['out_layer_dropout_keep_prob']: 1.0,
             self.placeholders['edge_weight_dropout_keep_prob']: 1.0
@@ -912,6 +909,15 @@ class DenseGGNNChemModel(ChemModel):
         acc_uas = acc_uas / total_examples
         print("Attachment scores - LAS : %.2f - UAS : %.2f" % (acc_las, acc_uas))
 
+    def test_evaluation(self):
+        test_loss, test_accs, test_errs, test_speed, test_steps, test_las, \
+        test_uas, test_labels, test_values, test_v, test_masks, test_ids, \
+        test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
+            self.run_epoch("Test run", self.test_data, False, 0)
+        print("Running model on test file: %s"%self.params['test_file'])
+        print("Valid Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
+              (test_las * 100, test_uas * 100, test_uas_e * 100))
+
     def evaluate_results(self, data_for_batch):
 
         batch_data = self.make_batch(data_for_batch)
@@ -919,15 +925,15 @@ class DenseGGNNChemModel(ChemModel):
             targets_and_sentence = [(x['labels'], x['raw_sentence']) for x in
                                     data_for_batch]
             node_masks = batch_data['node_mask']
-            softmax_mask = batch_data['softmax_mask']
+
         else:
             targets_and_sentence = [(x['labels'][0], x['raw_sentence']) for x in data_for_batch]
             node_masks = np.transpose(batch_data['node_mask'])
-            softmax_mask = np.transpose(batch_data['softmax_mask'])
+
 
         results = self.evaluate_one_batch(
             batch_data['init'], batch_data['adj_mat'],
-            node_masks = node_masks, softmax_mask=softmax_mask)
+            node_masks = node_masks)
 
         results = np.transpose(results)  # (b, e * v * o)
 
@@ -1380,7 +1386,7 @@ def main():
             print("restoring best model: %s" %best_model)
 
         model = DenseGGNNChemModel(args)
-        model.example_evaluation()
+        model.test_evaluation()
     elif args['--experiment']:
         model = DenseGGNNChemModel(args)
         model.experiment()
