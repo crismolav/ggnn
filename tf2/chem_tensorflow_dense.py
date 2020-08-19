@@ -41,6 +41,7 @@ from chem_tensorflow import ChemModel, get_train_and_validation_files
 from utils import glorot_init, MLP2
 import os
 import glob, os
+import csv
 
 
 def graph_to_adj_mat(graph, max_n_vertices, num_edge_types, tie_fwd_bkwd=True):
@@ -752,16 +753,15 @@ class DenseGGNNChemModel(ChemModel):
             #ID: [e, b, v, h] else [b, v, h]
 
             # batch_data['labels'] [b, e, v', v]
-
             target_values = self.get_target_values_formatted(
                 labels=batch_data['labels'], no_labels=True)
             # BTB [b, v * o] ID: [o, v, e, b]
             target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
             # [b, v * e]
-            pos_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['words_pos'], b=num_graphs, v=bucket_sizes[bucket])
             loc_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_loc'], b=num_graphs, v=bucket_sizes[bucket])
+            pos_inputs = self.get_word_inputs_padded(
+                words_pos=batch_data['words_pos'], b=num_graphs, v=bucket_sizes[bucket])
             word_id_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_index'], b=num_graphs, v=bucket_sizes[bucket])
             head_loc_inputs = self.get_word_inputs_padded(
@@ -914,7 +914,7 @@ class DenseGGNNChemModel(ChemModel):
         test_uas, test_labels, test_values, test_v, test_masks, test_ids, \
         test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
             self.run_epoch("Test run", self.test_data, False, 0)
-        print("Running model on test file: %s"%self.params['test_file'])
+        print("Running model on test file: %s\n"%self.params['test_file'])
         print("Valid Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
               (test_las * 100, test_uas * 100, test_uas_e * 100))
 
@@ -1052,12 +1052,12 @@ class DenseGGNNChemModel(ChemModel):
 
     def humanize_batch_results(self, labels, computed_values, num_vertices, mask,
                                      ids=None, adms=None, labels_e=None, computed_values_e=None,
-                                     mask_edges=None, out_file=None):
+                                     mask_edges=None, word_inputs=None, out_file=None):
         if self.args['--pr'] in ['btb']:
             acc_las, acc_uas, acc_uas_e = self.humanize_batch_results_btb(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
-                mask_edges=mask_edges, out_file=out_file)
+                mask_edges=mask_edges, word_inputs=word_inputs, out_file=out_file)
         else:
             acc_las, acc_uas, acc_uas_e = 0, 0, 0
             self.humanize_batch_results_others(
@@ -1091,8 +1091,9 @@ class DenseGGNNChemModel(ChemModel):
                 id, target_graph, result_graph))
 
     def humanize_batch_results_btb(self, labels, computed_values, num_vertices,
-                                         mask, ids=None, adms=None, labels_e=None,
-                                         computed_values_e=None, mask_edges=None, out_file=None):
+                                   mask, ids=None, adms=None, labels_e=None,
+                                   computed_values_e=None, mask_edges=None,
+                                   word_inputs=None, out_file=None):
 
         _, results_reshaped, targets_reshaped = self.get_results_reshaped(
             targets=labels, computed_values=computed_values, mask=mask,
@@ -1132,15 +1133,66 @@ class DenseGGNNChemModel(ChemModel):
             acc_uas += uas
             acc_uas_e += uas_e
 
-            if out_file:
-                # out_file.write("id %s target vs predicted vs input: \n%s vs \n\n%s vs \n\n%s\n\n" % (
-                #     id, target_graph, result_graph, input_graph))
-                self.write_to_file(id, target_graph, result_graph, input_graph, out_file=out_file)
+            if self.params.get('is_test'):
+                word_input = word_inputs[i]
+                self.write_results_analysis(
+                    word_input=word_input, result_graph=result_graph, target_graph=target_graph,
+                    input_graph=input_graph, csv_file=out_file)
+            else:
+                if out_file:
+                    self.write_to_file(id, target_graph, result_graph, input_graph, out_file=out_file)
         acc_las = acc_las/b
         acc_uas = acc_uas/b
         acc_uas_e = acc_uas_e/b
 
         return acc_las, acc_uas, acc_uas_e
+    def write_results_analysis(self, word_input, result_graph, target_graph, input_graph, csv_file):
+        active_nodes = len(target_graph) + 1
+        sentence_word_index = [int(x) for x in word_input[:, 2]][1:]
+
+        input_heads = [0] + [x[0] for x in input_graph]
+        input_edges = [0] + [x[1] for x in input_graph]
+        input_word_list = [self.index_to_word_dict[x] for x in word_input[:, 2]]
+        input_pos_list = [self.pos_list[int(x)] for x in word_input[:, 1]]
+
+        input_head_word_list = [input_word_list[int(x)] for x in input_heads]
+        input_head_pos_list = [input_pos_list[int(x)] for x in input_heads]
+        input_head_edges = [input_edges[int(x)] for x in input_heads]
+
+        target_heads = [0] +[x[0] for x in target_graph]
+        target_edges = [0] +[x[1] for x in target_graph]
+
+        result_heads = [0] + [x[0] for x in result_graph]
+        result_edges = [0] + [x[1] for x in result_graph]
+        #TODO:
+        #target POS
+
+        correct_results = [str(x == y) for x, y in zip(result_graph, target_graph)]
+
+        input_heads = input_heads[1:]
+        input_edges = input_edges[1:]
+        input_word_list = input_word_list[1:]
+        input_pos_list = input_pos_list[1:]
+
+        input_head_word_list = input_head_word_list[1:]
+        input_head_pos_list = input_head_pos_list[1:]
+        input_head_edges = input_head_edges[1:]
+
+        target_heads = target_heads[1:]
+        target_edges = target_edges[1:]
+
+        result_heads = result_heads[1:]
+        result_edges = result_edges[1:]
+
+        writer = csv.writer(csv_file)
+
+        for i, r_edge in enumerate(result_graph):
+            row = [i+1, correct_results[i], input_word_list[i], input_pos_list[i], input_edges[i], input_heads[i],
+                   input_head_word_list[i], input_head_pos_list[i], input_head_edges[i],
+                   result_heads[i], result_edges[i], target_heads[i], target_edges[i],
+                   active_nodes]
+            writer.writerow(row)
+
 
     def merge_head_and_edge_graph(self, result_graph_l, result_graph_e):
         return [[x[0], y[1]] for x, y in zip(result_graph_l, result_graph_e)]

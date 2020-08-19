@@ -13,6 +13,7 @@ from utils import MLP, ThreadedIterator, SMALL_NUMBER
 import sys
 sys.path.insert(1, './parser')
 from to_graph import get_dep_and_pos_list, sample_dep_list
+import csv
 
 dep_tree = True
 
@@ -146,13 +147,16 @@ class ChemModel(object):
 
         self.run_id = "_".join([time.strftime("%Y-%m-%d-%H-%M-%S"), str(os.getpid())])
         log_dir = args.get('--log_dir') or '.'
-        os.makedirs(log_dir, exist_ok=True)
+        tb_log_dir = os.path.join(log_dir, "tb", self.run_id)
+        if args.get('--evaluate'):
+            os.makedirs(log_dir, exist_ok=True)
+            os.makedirs(tb_log_dir, exist_ok=True)
+
         self.log_file = os.path.join(log_dir, "%s_log.json" % self.run_id)
         self.valid_results_file = os.path.join(log_dir, "%s_valid.txt" % self.run_id)
         self.train_results_file = os.path.join(log_dir, "%s_train.txt" % self.run_id)
         self.best_model_file = os.path.join(log_dir, "%s_model_best.pickle" % self.run_id)
-        tb_log_dir = os.path.join(log_dir, "tb", self.run_id)
-        os.makedirs(tb_log_dir, exist_ok=True)
+        self.test_results_file = os.path.join(log_dir, "%s_test.csv" % self.run_id)
 
         # Collect parameters:
         params = self.default_params()
@@ -182,22 +186,25 @@ class ChemModel(object):
         self.word_embedding_size = 100
         self.edge_embedding_size = 50
 
-        self.dep_list, self.pos_list, _, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['input_tree_bank'])
         bucket_sizes = self.get_bucket_sizes()
         bucket_max_nodes_index = np.argmax(bucket_sizes > self.max_nodes)
         self.bucket_max_nodes = bucket_sizes[bucket_max_nodes_index]
 
-        self.dep_list_out, _, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list_out, self.pos_list_out, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['output_tree_bank'])
 
         self.num_edge_types = len(self.dep_list)
         self.output_size_edges = len(self.dep_list_out)
 
-        self.train_data = self.load_data(params['train_file'], is_training_data=True)
-        self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
         if self.params.get('is_test'):
             self.test_data = self.load_data(params['test_file'], is_training_data=False)
+            self.index_to_word_dict = {v: k for v, k in enumerate(self.word_list)}
+        else:
+            self.word_list = []
+            self.train_data = self.load_data(params['train_file'], is_training_data=True)
+            self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
 
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
@@ -225,8 +232,9 @@ class ChemModel(object):
                 self.train_step_id = 0
                 self.valid_step_id = 0
 
-            self.train_writer = tf.compat.v1.summary.FileWriter(os.path.join(tb_log_dir, 'train'), graph=self.graph)
-            self.valid_writer = tf.compat.v1.summary.FileWriter(os.path.join(tb_log_dir, 'validation'), graph=self.graph)
+            if not self.params.get('is_test'):
+                self.train_writer = tf.compat.v1.summary.FileWriter(os.path.join(tb_log_dir, 'train'), graph=self.graph)
+                self.valid_writer = tf.compat.v1.summary.FileWriter(os.path.join(tb_log_dir, 'validation'), graph=self.graph)
 
     def load_data(self, file_name, is_training_data: bool):
         full_path = os.path.join(self.data_dir, file_name)
@@ -536,6 +544,16 @@ class ChemModel(object):
         all_num_vertices, all_masks, all_masks_e, all_ids, all_adj_m = \
             [], [], [], [], [], [], [], [], []
 
+        if self.params.get('is_test'):
+            csv_file = open(self.test_results_file, 'w', newline='')
+            writer = csv.writer(csv_file)
+            row_headers = ['loc', 'correct', 'token', 'POS', 'dep', 'head',
+                           'head_token', 'head_POS', 'head_dep',
+                           'result_head', 'result_edges',
+                           'target_head', 'target_edges', 'active_nodes']
+            writer.writerow(row_headers)
+        else:
+            csv_file = None
         for step, batch_data in enumerate(batch_iterator):
             num_graphs = batch_data[self.placeholders['num_graphs']]
             processed_graphs += num_graphs
@@ -588,16 +606,20 @@ class ChemModel(object):
             word_embeddings = result[index_d['word_embeddings']]
 
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
-            writer = self.train_writer if is_training else self.valid_writer
-            writer.add_summary(batch_summary, start_step + step)
+            if not self.params.get('is_test'):
+                writer = self.train_writer if is_training else self.valid_writer
+                writer.add_summary(batch_summary, start_step + step)
             loss += batch_loss * num_graphs
             accuracies.append(np.array(batch_accuracies) * num_graphs)
 
             try:
+                word_inputs = batch_data[self.placeholders['word_inputs']]
                 las, uas, uas_e = self.humanize_batch_results(
                     labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                     mask=node_mask, ids=sentences_id, adms=adjacency_matrix, labels_e=labels_edges,
-                    computed_values_e=computed_values_edges, mask_edges=node_mask_edges)
+                    computed_values_e=computed_values_edges, mask_edges=node_mask_edges,
+                    word_inputs=word_inputs, out_file=csv_file)
+
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs
                 acc_uas_e += uas_e * num_graphs
@@ -631,10 +653,6 @@ class ChemModel(object):
         acc_las = acc_las / processed_graphs
         acc_uas = acc_uas / processed_graphs
         acc_uas_e = acc_uas_e / processed_graphs
-        # if acc_las > 0.65:
-        #     self.print_all_results_as_graph(
-        #         all_labels=all_labels, all_computed_values=all_computed_values,
-        #         all_num_vertices=all_num_vertices, all_masks=all_masks)
 
         return loss, accuracies, error_ratios, instance_per_sec, steps, acc_las, acc_uas, \
                all_labels, all_computed_values, all_num_vertices, all_masks, \
@@ -758,7 +776,9 @@ class ChemModel(object):
 
     def restore_progress(self, model_path: str) -> (int, int):
         print("Restoring weights from file %s." % model_path)
-        with open(model_path, 'rb') as in_file:
+        log_dir = self.args.get('--log_dir') or '.'
+        full_model_path = os.path.join(log_dir, model_path)
+        with open(full_model_path, 'rb') as in_file:
             data_to_load = pickle.load(in_file)
 
         # Assert that we got the same model configuration
