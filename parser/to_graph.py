@@ -19,6 +19,7 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
     graph = []
     target_list = []
     sentence_pos_list = []
+    sentence_pos_list_out = []
     sentence_dict = {}
     words_index_list = []
     target_id = None
@@ -54,11 +55,13 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         elif problem in ['btb', 'btb_sample']:
             line_out = sentence_list_out[i]
             line_as_list_out = line_out.split('\t')
+            pos_out = line_as_list_out[3]
             father_out = line_as_list_out[6]
             dep_out = line_as_list_out[7].strip()
             edge_type_out = dep_list_out.index(dep_out) + 1
             target_unit = [int(father_out), int(edge_type_out)]
             target_list.append(target_unit)
+            sentence_pos_list_out.append(pos_out)
 
         dependencies_set.add(dep)
 
@@ -67,7 +70,13 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
     sentence_dict["node_features"] = get_node_features(
         problem=problem, selected_id=selected_id,
         target_id=target_id, sentence_list=sentence_list,
-        sentence_pos_list=sentence_pos_list, pos_list=pos_list)
+        sentence_pos_list=sentence_pos_list,
+        pos_list=pos_list)
+    sentence_dict["node_features_target"] = get_node_features(
+        problem=problem, selected_id=selected_id,
+        target_id=target_id, sentence_list=sentence_list,
+        sentence_pos_list=sentence_pos_list_out,
+        pos_list=pos_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
     sentence_dict["id"] = str(sentence_id).zfill(5)
     #we add the zero index to the node zero

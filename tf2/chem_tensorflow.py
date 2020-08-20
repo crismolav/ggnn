@@ -148,7 +148,7 @@ class ChemModel(object):
         self.run_id = "_".join([time.strftime("%Y-%m-%d-%H-%M-%S"), str(os.getpid())])
         log_dir = args.get('--log_dir') or '.'
         tb_log_dir = os.path.join(log_dir, "tb", self.run_id)
-        if args.get('--evaluate'):
+        if not args.get('--evaluate'):
             os.makedirs(log_dir, exist_ok=True)
             os.makedirs(tb_log_dir, exist_ok=True)
 
@@ -547,10 +547,13 @@ class ChemModel(object):
         if self.params.get('is_test'):
             csv_file = open(self.test_results_file, 'w', newline='')
             writer = csv.writer(csv_file)
-            row_headers = ['loc', 'correct', 'token', 'POS', 'dep', 'head',
+            row_headers = ['loc', 'token',  'LAS', 'UAS', 'label_acc',
+                           'POS', 'dep', 'dep_l', 'head',
                            'head_token', 'head_POS', 'head_dep',
-                           'result_head', 'result_edges',
-                           'target_head', 'target_edges', 'active_nodes']
+                           'head_dep_l',
+                           'target_head', 'target_pos', 'target_dep', 'target_dep_l',
+                           'result_head', 'result_dep', 'result_dep',
+                           'active_nodes']
             writer.writerow(row_headers)
         else:
             csv_file = None
@@ -563,6 +566,7 @@ class ChemModel(object):
                                 'losses','edge_weights', 'edge_biases',
                                 'num_vertices', 'adjacency_matrix',
                                 'sentences_id', 'word_inputs',
+                                'target_pos',
                                 'computed_values_edges', 'labels_edges',
                                 'node_mask_edges', 'word_embeddings']
 
@@ -572,6 +576,7 @@ class ChemModel(object):
                           self.ops['losses'], self.weights['edge_weights'], self.weights['edge_biases'],
                           self.placeholders['num_vertices'], self.placeholders['adjacency_matrix'],
                           self.placeholders['sentences_id'], self.ops['word_inputs'],
+                          self.placeholders['target_pos'],
                           self.ops['computed_values_edges'], self.placeholders['target_values_edges'],
                           self.placeholders['node_mask_edges'], self.weights['word_embeddings']
                           ]
@@ -600,6 +605,7 @@ class ChemModel(object):
             adjacency_matrix = result[index_d['adjacency_matrix']]
             sentences_id = result[index_d['sentences_id']]
             word_inputs = result[index_d['word_inputs']]
+            target_pos = result[index_d['target_pos']]
             computed_values_edges = result[index_d['computed_values_edges']]
             labels_edges = result[index_d['labels_edges']]
             node_mask_edges = result[index_d['node_mask_edges']]
@@ -618,7 +624,7 @@ class ChemModel(object):
                     labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                     mask=node_mask, ids=sentences_id, adms=adjacency_matrix, labels_e=labels_edges,
                     computed_values_e=computed_values_edges, mask_edges=node_mask_edges,
-                    word_inputs=word_inputs, out_file=csv_file)
+                    word_inputs=word_inputs, target_pos=target_pos, out_file=csv_file)
 
                 acc_las += las * num_graphs
                 acc_uas += uas * num_graphs

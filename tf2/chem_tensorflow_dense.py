@@ -177,6 +177,9 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
         self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
             tf.int32, [None, None, 6], name='word_inputs')
+        # [b, v, 6]
+        self.placeholders['target_pos'] = tf.compat.v1.placeholder(
+            tf.int32, [None, None], name='target_pos')
         # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
             tf.float32, [None, 2 * self.num_edge_types, None, None], name='adjacency_matrix')
@@ -488,7 +491,8 @@ class DenseGGNNChemModel(ChemModel):
                 'words_index': d["words_index"],
                 'words_head': words_head,
                 'words_head_pos': [d["node_features"][x] for x in words_head],
-                'edges_index': edges_index
+                'edges_index': edges_index,
+                'target_pos' : d["node_features_target"]
             }
             bucketed[chosen_bucket_idx].append(bucketed_dict)
 
@@ -671,7 +675,8 @@ class DenseGGNNChemModel(ChemModel):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
                       'node_mask_edges': [], 'task_masks': [], 'sentences_id': [],
                       'words_pos':[], 'words_loc':[], 'words_index': [],
-                      'words_head': [], 'words_head_pos': [], 'edges_index': []}
+                      'words_head': [], 'words_head_pos': [], 'edges_index': [],
+                      'target_pos': []}
         for d in elements:
             dd = d
             batch_data['adj_mat'].append(d['adj_mat'])
@@ -686,6 +691,7 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['words_head'].append(d['words_head'])
             batch_data['words_head_pos'].append(d['words_head_pos'])
             batch_data['edges_index'].append(d['edges_index'])
+            batch_data['target_pos'].append(d['target_pos'])
 
             target_task_values = []
             target_task_mask = []
@@ -771,6 +777,10 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['edges_index'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
+            target_pos = self.get_word_inputs_padded(
+                words_pos=batch_data['target_pos'], b=num_graphs, v=bucket_sizes[bucket])
+            # [b, v]
+
             word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
                                     head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
             # [b, v, 6]
@@ -793,9 +803,12 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['edge_weight_dropout_keep_prob']: dropout_keep_prob,
                 self.placeholders['emb_dropout_keep_prob']: emb_dropout_keep_prob,
                 self.placeholders['sentences_id']: batch_data['sentences_id'],
-                self.placeholders['word_inputs']: word_inputs
-                # [b, v, 2]
+                self.placeholders['word_inputs']: word_inputs,
+                # [b, v, 6]
+                self.placeholders['target_pos']: target_pos
+                # [b, v]
             }
+
             if self.args['--pr'] not in ['btb']:
                 batch_feed_dict[self.placeholders['initial_node_representation']] = initial_representations,
                 # ID: [e, b, v, h] else [b, v, h]
@@ -915,7 +928,7 @@ class DenseGGNNChemModel(ChemModel):
         test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
             self.run_epoch("Test run", self.test_data, False, 0)
         print("Running model on test file: %s\n"%self.params['test_file'])
-        print("Valid Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
+        print("Test Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
               (test_las * 100, test_uas * 100, test_uas_e * 100))
 
     def evaluate_results(self, data_for_batch):
@@ -1052,12 +1065,12 @@ class DenseGGNNChemModel(ChemModel):
 
     def humanize_batch_results(self, labels, computed_values, num_vertices, mask,
                                      ids=None, adms=None, labels_e=None, computed_values_e=None,
-                                     mask_edges=None, word_inputs=None, out_file=None):
+                                     mask_edges=None, word_inputs=None, target_pos=None, out_file=None):
         if self.args['--pr'] in ['btb']:
             acc_las, acc_uas, acc_uas_e = self.humanize_batch_results_btb(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
-                mask_edges=mask_edges, word_inputs=word_inputs, out_file=out_file)
+                mask_edges=mask_edges, word_inputs=word_inputs, target_pos=target_pos, out_file=out_file)
         else:
             acc_las, acc_uas, acc_uas_e = 0, 0, 0
             self.humanize_batch_results_others(
@@ -1093,7 +1106,7 @@ class DenseGGNNChemModel(ChemModel):
     def humanize_batch_results_btb(self, labels, computed_values, num_vertices,
                                    mask, ids=None, adms=None, labels_e=None,
                                    computed_values_e=None, mask_edges=None,
-                                   word_inputs=None, out_file=None):
+                                   word_inputs=None, target_pos=None, out_file=None):
 
         _, results_reshaped, targets_reshaped = self.get_results_reshaped(
             targets=labels, computed_values=computed_values, mask=mask,
@@ -1118,13 +1131,11 @@ class DenseGGNNChemModel(ChemModel):
             target_graph_h = adj_mat_to_target(adj_mat=target)
             target_graph_e = adj_mat_to_target(adj_mat=target_e)
             target_graph = self.merge_head_and_edge_graph(target_graph_h, target_graph_e)
-
             result_graph_h = adj_mat_to_target(
                 adj_mat=result, is_probability=True, true_target=target_graph_h)
             result_graph_e = adj_mat_to_target(
                 adj_mat=result_e, is_probability=True)
             result_graph = self.merge_head_and_edge_graph(result_graph_h, result_graph_e)
-
             input_graph =  adj_mat_to_target(adj_mat=adm)
             las, uas = self.get_las_uas(target_graph, result_graph)
             _, uas_e = self.get_las_uas(target_graph_e, result_graph_e, is_edge=True)
@@ -1135,8 +1146,10 @@ class DenseGGNNChemModel(ChemModel):
 
             if self.params.get('is_test'):
                 word_input = word_inputs[i]
+                target_pos_i = target_pos[i]
                 self.write_results_analysis(
-                    word_input=word_input, result_graph=result_graph, target_graph=target_graph,
+                    word_input=word_input, target_pos=target_pos_i,
+                    result_graph=result_graph, target_graph=target_graph,
                     input_graph=input_graph, csv_file=out_file)
             else:
                 if out_file:
@@ -1146,12 +1159,13 @@ class DenseGGNNChemModel(ChemModel):
         acc_uas_e = acc_uas_e/b
 
         return acc_las, acc_uas, acc_uas_e
-    def write_results_analysis(self, word_input, result_graph, target_graph, input_graph, csv_file):
+    def write_results_analysis(self, word_input, target_pos, result_graph, target_graph, input_graph, csv_file):
         active_nodes = len(target_graph) + 1
         sentence_word_index = [int(x) for x in word_input[:, 2]][1:]
 
         input_heads = [0] + [x[0] for x in input_graph]
         input_edges = [0] + [x[1] for x in input_graph]
+
         input_word_list = [self.index_to_word_dict[x] for x in word_input[:, 2]]
         input_pos_list = [self.pos_list[int(x)] for x in word_input[:, 1]]
 
@@ -1161,13 +1175,16 @@ class DenseGGNNChemModel(ChemModel):
 
         target_heads = [0] +[x[0] for x in target_graph]
         target_edges = [0] +[x[1] for x in target_graph]
+        target_pos_list = [self.pos_list_out[int(x)] for x in target_pos]
 
         result_heads = [0] + [x[0] for x in result_graph]
         result_edges = [0] + [x[1] for x in result_graph]
         #TODO:
         #target POS
 
-        correct_results = [str(x == y) for x, y in zip(result_graph, target_graph)]
+        correct_las = [int(x == y) for x, y in zip(result_graph, target_graph)]
+        correct_uas = [int(x[0] == y[0]) for x, y in zip(result_graph, target_graph)]
+        correct_label = [int(x[1] == y[1]) for x, y in zip(result_graph, target_graph)]
 
         input_heads = input_heads[1:]
         input_edges = input_edges[1:]
@@ -1180,16 +1197,27 @@ class DenseGGNNChemModel(ChemModel):
 
         target_heads = target_heads[1:]
         target_edges = target_edges[1:]
+        target_pos_list = target_pos_list[1:]
+
 
         result_heads = result_heads[1:]
         result_edges = result_edges[1:]
 
+        input_edges_l  = [self.dep_list[x - 1] for x in input_edges]
+        input_head_edges_l = [(['zero']+self.dep_list)[x] for x in input_head_edges]
+        target_edges_l = [self.dep_list_out[x - 1] for x in target_edges]
+        result_edges_l = [self.dep_list_out[x - 1] for x in result_edges]
+
+
         writer = csv.writer(csv_file)
 
         for i, r_edge in enumerate(result_graph):
-            row = [i+1, correct_results[i], input_word_list[i], input_pos_list[i], input_edges[i], input_heads[i],
+            row = [i+1, input_word_list[i], correct_las[i], correct_uas[i], correct_label[i],
+                   input_pos_list[i], input_edges[i], input_edges_l[i], input_heads[i],
                    input_head_word_list[i], input_head_pos_list[i], input_head_edges[i],
-                   result_heads[i], result_edges[i], target_heads[i], target_edges[i],
+                   input_head_edges_l[i],
+                   target_heads[i], target_pos_list[i], target_edges[i], target_edges_l[i],
+                   result_heads[i], result_edges[i], result_edges_l[i],
                    active_nodes]
             writer.writerow(row)
 
