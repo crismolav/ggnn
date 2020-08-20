@@ -360,7 +360,7 @@ class ChemModel(object):
                     # ID: [e * v * o,b]
                 elif self.args['--pr'] in ['btb']:
                     labels = self.placeholders['target_values_head']  # [b, v * o]
-                    mask = self.placeholders['node_mask'] #[b, v * e * o]
+                    mask = self.placeholders['node_mask'] #[b, v * o]
                     labels_edges = self.placeholders['target_values_edges']  # [b, v * e]
                     mask_edges = self.placeholders['node_mask_edges'] # [b, v * e]
                 else:
@@ -385,15 +385,14 @@ class ChemModel(object):
                 if  self.args['--pr'] == 'molecule':
                     self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
                 else:
-                    if self.args.get('--no_labels') or self.args.get('--only_labels'):
-                        computed_values, labels, mask = self.reduce_edge_dimension(
-                            computed_values=computed_values, labels=labels, mask=mask)
-
                     if self.args['--pr'] == 'btb':
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))/task_target_num
                         task_loss = task_loss_heads + task_loss_edges
                     else:
+                        if self.args.get('--no_labels'):
+                            computed_values, labels, mask = self.reduce_edge_dimension(
+                                computed_values=computed_values, labels=labels, mask=mask)
                         new_mask = tf.cast(mask, tf.bool)
                         masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
                         task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
@@ -411,11 +410,8 @@ class ChemModel(object):
         self.ops['loss_edges'] = tf.reduce_sum(input_tensor=self.ops['losses_edges'])
 
     def reduce_edge_dimension(self, computed_values, labels, mask):
-        if self.args['--pr'] in ['btb']:
-            return computed_values, labels, mask
-        else:
-            return self.reduce_edge_dimension_other(
-                computed_values=computed_values, labels=labels, mask=mask)
+        return self.reduce_edge_dimension_other(
+            computed_values=computed_values, labels=labels, mask=mask)
 
     def reduce_edge_dimension_other(self, computed_values, labels, mask):
         # computed_values, labels, mask ( e * v * o,  b)
@@ -451,23 +447,14 @@ class ChemModel(object):
         labels = tf.reshape(labels, [b, e, v, v]) # [b, e, v', v]
         mask = tf.reshape(mask,[b, e, v, v]) # [b, e, v', v]
 
-        if self.args.get('--only_labels'):
-            ax = 3
-            computed_values = tf.math.reduce_sum(computed_values, axis=ax)
-            labels = tf.math.reduce_sum(labels, axis=ax)
-            mask = tf.math.reduce_mean(mask, axis=ax)
+        ax = 3
+        computed_values = tf.math.reduce_sum(computed_values, axis=ax)
+        labels = tf.math.reduce_sum(labels, axis=ax)
+        mask = tf.math.reduce_mean(mask, axis=ax)
 
-            computed_values = tf.reshape(computed_values, [b, e * v])  # [b, e * v']
-            labels = tf.reshape(labels, [b, e * v])  # [b, e * v']
-            mask = tf.reshape(mask, [b, e * v])  # [b, e * v']
-        else:
-            computed_values = tf.math.reduce_sum(computed_values, axis = 1)
-            labels = tf.math.reduce_sum(labels, axis=1)
-            mask = tf.math.reduce_mean(mask, axis=1)
-
-            computed_values = tf.reshape(computed_values, [b, v * v]) # [b, v' * v]
-            labels = tf.reshape(labels, [b, v * v]) # [b, v' * v]
-            mask = tf.reshape(mask, [b, v * v]) # [b, v' * v]
+        computed_values = tf.reshape(computed_values, [b, e * v])  # [b, e * v']
+        labels = tf.reshape(labels, [b, e * v])  # [b, e * v']
+        mask = tf.reshape(mask, [b, e * v])  # [b, e * v']
 
         return computed_values, labels, mask
 

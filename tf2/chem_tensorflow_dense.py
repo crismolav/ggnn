@@ -401,7 +401,7 @@ class DenseGGNNChemModel(ChemModel):
         # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
 
         node_mask = self.placeholders['node_mask']
-        # BTB: #[b, v * e * o_] ID [b, e * v * o]
+        # BTB: #[b, v * o] ID [b, e * v * o]
         softmax_mask = self.placeholders['softmax_mask'] # ID [b, e * v * o]
 
         if self.args['--pr'] == 'molecule':
@@ -433,7 +433,8 @@ class DenseGGNNChemModel(ChemModel):
             # self.ops['regression_transform'] = regression_transform(last_h)
         elif self.args['--pr'] in ['btb']:
             # gated_outputs  [b * v, o]
-            # node_mask [b, v * e * o]
+            # node_mask [b, v * o]
+            # node_mask_edge  [b, v * e]
             gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
             softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, o]
             softmax = tf.reshape(softmax, [b, v * output_n]) # [b, v * o]
@@ -478,8 +479,10 @@ class DenseGGNNChemModel(ChemModel):
                 'labels':  self.get_labels_padded(
                     data_dict=dd, chosen_bucket_size=chosen_bucket_size,
                     n_active_nodes=n_active_nodes),
-                #BTB : [e, v', v]  ID [e, v, o]
+                # BTB : [e, v', v]  ID [e, v, o]
                 'mask': self.get_mask(n_active_nodes=n_active_nodes, chosen_bucket_size=chosen_bucket_size),
+
+                # BTB : [v * o]  ID [e * v, o]
                 'mask_edges': self.get_mask(n_active_nodes=n_active_nodes,
                                             chosen_bucket_size=chosen_bucket_size, is_edge=True),
                 # [v * e]
@@ -595,7 +598,6 @@ class DenseGGNNChemModel(ChemModel):
 
                 final_mask = np.mean(final_mask, axis=1)
                 final_mask = np.reshape(final_mask, [-1])
-
             return final_mask  # BTB [v * o] ID [e * v, o]
         else:
             return [1. for _ in range(n_active_nodes) ] + [0. for _ in range(chosen_bucket_size - n_active_nodes)]
@@ -796,7 +798,7 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['adjacency_matrix']: batch_data['adj_mat'],
                 #[b, e, v', v] bd: [b, 2e, v', v]
                 self.placeholders['node_mask']: np.array(batch_data['node_mask']),
-                # BTB [b, v * e * o_] ID [b, e * v * o]
+                # BTB [b, v * o] ID [b, e * v * o]
                 self.placeholders['node_mask_edges']: np.array(batch_data['node_mask_edges']),
                 # BTB [b, v * e]
                 self.placeholders['graph_state_keep_prob']: dropout_keep_prob,
@@ -808,7 +810,6 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['target_pos']: target_pos
                 # [b, v]
             }
-
             if self.args['--pr'] not in ['btb']:
                 batch_feed_dict[self.placeholders['initial_node_representation']] = initial_representations,
                 # ID: [e, b, v, h] else [b, v, h]
