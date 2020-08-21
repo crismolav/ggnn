@@ -256,7 +256,8 @@ class DenseGGNNChemModel(ChemModel):
             word_inputs = tf.concat(
                 [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs, bert_index_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
-            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]])
+            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]],
+                                 mode='constant')
             # BTB: [b, v, h]
             return word_inputs
         else:
