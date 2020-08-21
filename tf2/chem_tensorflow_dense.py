@@ -392,7 +392,7 @@ class DenseGGNNChemModel(ChemModel):
 
         initial_node_representation = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
         # ID [e, b, v, h] else [b, v, h]
-        gate_input = tf.concat([initial_node_representation, initial_node_representation], axis = -1)
+        gate_input = tf.concat([last_h, initial_node_representation], axis = -1)
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
