@@ -93,7 +93,8 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
             'emb_dropout_keep_prob': 0.6,
-            'hidden_size': 350 + 768 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 1120 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size_b': 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -330,15 +331,17 @@ class ChemModel(object):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
-                                                                           self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
-                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
+                    self.weights['regression_gate_task%i' % task_id] = MLP(
+                        self.params['hidden_size'] + self.params['hidden_size_b'], output_size, [],
+                        self.placeholders['out_layer_dropout_keep_prob'])
+                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(
+                        self.params['hidden_size'] + self.params['hidden_size_b'], self.output_size_edges, [],
+                        self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
-                                                                                self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_transform_task_edges%i' % task_id] = MLP(self.params['hidden_size'], self.output_size_edges, [],
-                                                                                      self.placeholders['out_layer_dropout_keep_prob'])
+                    self.weights['regression_transform_task%i' % task_id] = MLP(
+                        self.params['hidden_size_b'], output_size, [], self.placeholders['out_layer_dropout_keep_prob'])
+                    self.weights['regression_transform_task_edges%i' % task_id] = MLP(
+                        self.params['hidden_size_b'], self.output_size_edges, [], self.placeholders['out_layer_dropout_keep_prob'])
 
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
