@@ -398,7 +398,8 @@ class DenseGGNNChemModel(ChemModel):
         # ID [e * b * v, 2h] else [b * v, 2h]
         last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
         # ID [e * b * v, h] else [b * v, h]
-        gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
+        # gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
+        gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) 
         # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
 
         node_mask = self.placeholders['node_mask']
