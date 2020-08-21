@@ -254,7 +254,8 @@ class DenseGGNNChemModel(ChemModel):
             word_inputs = tf.concat(
                 [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
-            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]])
+            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]],
+                                 mode='constant')
             # BTB: [b, v, h]
             return word_inputs
         else:
@@ -530,7 +531,8 @@ class DenseGGNNChemModel(ChemModel):
                 #First we add the index of the node in the graph
                 index_vector = [0] * v
                 index_vector[i] = 1
-                index_vector = np.pad(index_vector, pad_width=[0, self.bucket_max_nodes - v])
+                index_vector = np.pad(index_vector, pad_width=[0, self.bucket_max_nodes - v],
+                                      mode='constant')
 
                 #Second we add the POS of each node
 
