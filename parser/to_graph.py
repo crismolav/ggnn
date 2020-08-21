@@ -3,7 +3,7 @@ from pdb import set_trace
 import os
 import sys
 import random
-from bert_embedding import BertEmbedding
+# from bert_embedding import BertEmbedding
 import numpy as np
 from numpy import save, load
 POS_list = [
@@ -15,7 +15,7 @@ POS_list = [
     'PDT', 'RBS', 'WP', 'JJS', 'EX', 'UH', 'FW', '#', 'LS']
 
 sample_dep_list = ['ROOT', 'det', 'nsubj', 'aux']
-bert_embedding = BertEmbedding()
+# bert_embedding = BertEmbedding()
 
 def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=None,
                      dep_list_out=None, sentence_id=None, pos_list=None, word_dict=None,
@@ -294,11 +294,11 @@ def get_bert_array(all_words_list):
     bert_list = []
     max = -1
     count = 0
-    for token in all_words_list:
-        bert_list.append(bert_embedding([token])[0][1][0])
-        count+=1
-        if max!=-1 and count == max:
-            break
+    # for token in all_words_list:
+    #     bert_list.append(bert_embedding([token])[0][1][0])
+    #     count+=1
+    #     if max!=-1 and count == max:
+    #         break
 
     bert_array = np.array(bert_list) # [n , 768]
     return bert_array
