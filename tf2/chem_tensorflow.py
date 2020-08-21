@@ -7,6 +7,7 @@ import random
 import time
 from typing import List, Any, Sequence
 import numpy as np
+from numpy import load
 import tensorflow as tf
 from pdb import set_trace
 from utils import MLP, ThreadedIterator, SMALL_NUMBER
@@ -92,7 +93,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
             'emb_dropout_keep_prob': 0.6,
-            'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 350 + 768 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -186,13 +187,13 @@ class ChemModel(object):
         self.word_embedding_size = 100
         self.edge_embedding_size = 50
 
-        self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes, _ = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['input_tree_bank'])
         bucket_sizes = self.get_bucket_sizes()
         bucket_max_nodes_index = np.argmax(bucket_sizes > self.max_nodes)
         self.bucket_max_nodes = bucket_sizes[bucket_max_nodes_index]
 
-        self.dep_list_out, self.pos_list_out, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
+        self.dep_list_out, self.pos_list_out, _, _ , _, _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['output_tree_bank'])
 
         self.num_edge_types = len(self.dep_list)
@@ -206,6 +207,7 @@ class ChemModel(object):
             self.train_data = self.load_data(params['train_file'], is_training_data=True)
             self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
 
+        self.bert_embeddings = self.load_bert()
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -235,6 +237,11 @@ class ChemModel(object):
             if not self.params.get('is_test'):
                 self.train_writer = tf.compat.v1.summary.FileWriter(os.path.join(tb_log_dir, 'train'), graph=self.graph)
                 self.valid_writer = tf.compat.v1.summary.FileWriter(os.path.join(tb_log_dir, 'validation'), graph=self.graph)
+
+    def load_bert(self):
+        file_name = 'bert_array.npy'
+        bert_array = np.load(file_name)
+        return bert_array
 
     def load_data(self, file_name, is_training_data: bool):
         full_path = os.path.join(self.data_dir, file_name)
