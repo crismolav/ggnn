@@ -250,7 +250,7 @@ class DenseGGNNChemModel(ChemModel):
             # BTB: [b, v, e_em] not used didn't seem useful
             bert_index_inputs = tf.nn.embedding_lookup(
                 self.bert_embeddings_tensors, word_inputs[:, :, 6])
-            bert_index_inputs = tf.nn.dropout(edges_inputs,
+            bert_index_inputs = tf.nn.dropout(bert_index_inputs,
                                          1 - (self.placeholders['emb_dropout_keep_prob']))
 
             word_inputs = tf.concat(
