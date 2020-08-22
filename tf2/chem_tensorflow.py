@@ -323,9 +323,9 @@ class ChemModel(object):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [350, 350, 350, 350, 200],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [100, 100, 100, 80],
+                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
@@ -388,7 +388,7 @@ class ChemModel(object):
                     if self.args['--pr'] == 'btb':
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))/task_target_num
-                        task_loss = task_loss_heads + task_loss_edges
+                        task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
                     else:
                         if self.args.get('--no_labels'):
                             computed_values, labels, mask = self.reduce_edge_dimension(
@@ -396,7 +396,6 @@ class ChemModel(object):
                         new_mask = tf.cast(mask, tf.bool)
                         masked_loss = tf.boolean_mask(tensor=labels * tf.math.log(computed_values), mask= new_mask)
                         task_loss = tf.reduce_sum(input_tensor=-1*masked_loss)/task_target_num
-
                     self.ops['accuracy_task%i' % task_id] = task_loss
                     self.ops['losses'].append(task_loss)
                     self.ops['losses_edges'].append(task_loss_edges)
