@@ -93,7 +93,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
             'emb_dropout_keep_prob': 0.6,
-            'hidden_size': 350 + 768 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 200 + 768 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
