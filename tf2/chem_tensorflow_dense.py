@@ -221,7 +221,7 @@ class DenseGGNNChemModel(ChemModel):
                                                  state_keep_prob=self.placeholders['graph_state_keep_prob'])
             self.weights['node_gru'] = cell
 
-    def get_initial_node_representation(self, h_dim, p_em, l_em, w_em):
+    def get_initial_node_representation(self, h_dim, regression_bert):
         if self.args['--pr'] in ['btb']:
             word_inputs = self.placeholders['word_inputs']  # [b, v, 2]
             loc_inputs = tf.nn.embedding_lookup(
@@ -248,13 +248,10 @@ class DenseGGNNChemModel(ChemModel):
                 self.weights['edge_embeddings'], word_inputs[:, :, 5])
             edges_inputs = tf.nn.dropout(edges_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
             # BTB: [b, v, e_em] not used didn't seem useful
-            bert_index_inputs = tf.nn.embedding_lookup(
-                self.bert_embeddings_tensors, word_inputs[:, :, 6])
-            bert_index_inputs = tf.nn.dropout(bert_index_inputs,
-                                         1 - (self.placeholders['emb_dropout_keep_prob']))
-
+            bert_inputs = self.get_bert_representation(regression_bert)
+            # BTB: [b, v, h_bert]
             word_inputs = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs, bert_index_inputs], 2)
+                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs, bert_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]],
                                  mode='constant')
@@ -263,7 +260,16 @@ class DenseGGNNChemModel(ChemModel):
         else:
             return self.placeholders['initial_node_representation']
 
-    def compute_final_node_representations(self) -> tf.Tensor:
+    def get_bert_representation(self, regression_bert):
+        word_inputs = self.placeholders['word_inputs']  # [b, v, 2]
+        bert_index_inputs = tf.nn.embedding_lookup(
+            self.bert_embeddings_tensors, word_inputs[:, :, 6])
+        bert_index_inputs = tf.nn.dropout(
+            bert_index_inputs,1 - (self.placeholders['emb_dropout_keep_prob'])) # [b, v, 768]
+        bert_transformed = regression_bert(bert_index_inputs) # [b, v, 200]
+        return bert_transformed
+
+    def compute_final_node_representations(self, regression_bert) -> tf.Tensor:
         v = self.placeholders['num_vertices']
         e = self.num_edge_types
         b = self.placeholders['num_graphs']
@@ -271,7 +277,7 @@ class DenseGGNNChemModel(ChemModel):
         p_em = self.pos_embedding_size
         l_em = self.loc_embedding_size
         w_em = self.word_embedding_size
-        h = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
+        h = self.get_initial_node_representation(h_dim, regression_bert)
         # BTB: [b * v, h] ID: [e, b, v, h] else : [b, v, h]    v' main dimension
         self.ops['word_inputs'] = h
         h = tf.reshape(h, [-1, h_dim])
@@ -381,7 +387,8 @@ class DenseGGNNChemModel(ChemModel):
         self.ops['_am'] = tf.identity(self.__adjacency_matrix)
         return acts
 
-    def gated_regression(self, last_h, regression_gate, regression_transform, is_edge_regr=False):
+    def gated_regression(self, last_h, regression_gate, regression_transform, regression_bert,
+                         is_edge_regr=False):
         # last_h ID [e, b, v, h] else [b, v, h]
         b = self.placeholders['num_graphs']
         e = self.num_edge_types
@@ -392,7 +399,7 @@ class DenseGGNNChemModel(ChemModel):
         l_em = self.loc_embedding_size
         w_em = self.word_embedding_size
 
-        initial_node_representation = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
+        initial_node_representation = self.get_initial_node_representation(h_dim, regression_bert)
         # ID [e, b, v, h] else [b, v, h]
         gate_input = tf.concat([last_h, initial_node_representation], axis = -1)
         # ID [e, b, v, 2h] else [b, v, 2h]
@@ -1360,7 +1367,8 @@ class DenseGGNNChemModel(ChemModel):
 
         return last_h
 
-    def gated_regression_np(self, last_h, regression_gate, regression_transform, batch_data):
+    def gated_regression_np(self, last_h, regression_gate, regression_transform,
+                            regression_bert, batch_data):
         # last_h: [b x v x h]
         e = self.num_edge_types
         v = batch_data['num_vertices']

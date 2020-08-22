@@ -93,7 +93,8 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
             'emb_dropout_keep_prob': 0.6,
-            'hidden_size': 350 + 768 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 550 if self.args['--pr'] not in ['identity'] else 350,
+            'bert_hidden': 200,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -316,11 +317,17 @@ class ChemModel(object):
         self.placeholders['num_graphs'] = tf.compat.v1.placeholder(tf.int32, [], name='num_graphs')
         self.placeholders['out_layer_dropout_keep_prob'] = tf.compat.v1.placeholder(tf.float32, [], name='out_layer_dropout_keep_prob')
 
+
+        with tf.compat.v1.variable_scope("out_layer_task0"):
+            with tf.compat.v1.variable_scope("regression_bert"):
+                self.weights['regression_bert_task'] = MLP(
+                    768, self.params['bert_hidden'], [], self.placeholders['out_layer_dropout_keep_prob'])
+
         with tf.compat.v1.variable_scope("graph_model"):
             self.prepare_specific_graph_model()
             # This does the actual graph work:
             if self.params['use_graph']:
-                self.ops['final_node_representations'] = self.compute_final_node_representations()
+                self.ops['final_node_representations'] = self.compute_final_node_representations(self.weights['regression_bert_task'])
             else:
                 self.ops['final_node_representations'] = tf.zeros_like(self.placeholders['initial_node_representation'])
 
@@ -340,14 +347,17 @@ class ChemModel(object):
                     self.weights['regression_transform_task_edges%i' % task_id] = MLP(self.params['hidden_size'], self.output_size_edges, [],
                                                                                       self.placeholders['out_layer_dropout_keep_prob'])
 
+
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
-                                                        self.weights['regression_transform_task%i' % task_id])
+                                                        self.weights['regression_transform_task%i' % task_id],
+                                                        self.weights['regression_bert_task'])
                 # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 if self.args['--pr'] in ['btb']:
                     computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
                                                                   self.weights['regression_gate_task_edges%i' % task_id],
                                                                   self.weights['regression_transform_task_edges%i' % task_id],
+                                                                  self.weights['regression_bert_task'],
                                                                   is_edge_regr=True)
                     # [b, v * e]
 
@@ -508,7 +518,7 @@ class ChemModel(object):
                 tf.compat.v1.summary.scalar('accuracy%i' % task_id, self.ops['accuracy_task%i' % task_id])
         self.ops['summary'] = tf.compat.v1.summary.merge_all()
 
-    def gated_regression(self, last_h, regression_gate, regression_transform):
+    def gated_regression(self, last_h, regression_gate, regression_transform, regression_bert, is_edge_regr):
         raise Exception("Models have to implement gated_regression!")
 
     def prepare_specific_graph_model(self) -> None:
