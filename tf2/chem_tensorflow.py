@@ -388,7 +388,8 @@ class ChemModel(object):
                     if self.args['--pr'] == 'btb':
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))/task_target_num
-                        task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
+                        # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
+                        task_loss = (task_loss_heads + task_loss_edges)
                     else:
                         if self.args.get('--no_labels'):
                             computed_values, labels, mask = self.reduce_edge_dimension(
