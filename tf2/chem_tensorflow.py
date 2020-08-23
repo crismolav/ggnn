@@ -91,7 +91,7 @@ class ChemModel(object):
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
-            'emb_dropout_keep_prob': 0.4,
+            'emb_dropout_keep_prob': 0.7,
             'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
@@ -312,8 +312,10 @@ class ChemModel(object):
         with tf.compat.v1.variable_scope("graph_model"):
             self.prepare_specific_graph_model()
             # This does the actual graph work:
+            self.ops['initial_node_representations'] = self.get_initial_node_representation()
             if self.params['use_graph']:
-                self.ops['final_node_representations'] = self.compute_final_node_representations()
+                self.ops['final_node_representations'] = self.compute_final_node_representations(
+                    self.ops['initial_node_representations'])
             else:
                 self.ops['final_node_representations'] = tf.zeros_like(self.placeholders['initial_node_representation'])
 
@@ -334,11 +336,13 @@ class ChemModel(object):
                                                                                       self.placeholders['out_layer_dropout_keep_prob'])
 
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
+                                                        self.ops['initial_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
                 # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 if self.args['--pr'] in ['btb']:
                     computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
+                                                                  self.ops[ 'initial_node_representations'],
                                                                   self.weights['regression_gate_task_edges%i' % task_id],
                                                                   self.weights['regression_transform_task_edges%i' % task_id],
                                                                   is_edge_regr=True)
@@ -501,13 +505,13 @@ class ChemModel(object):
                 tf.compat.v1.summary.scalar('accuracy%i' % task_id, self.ops['accuracy_task%i' % task_id])
         self.ops['summary'] = tf.compat.v1.summary.merge_all()
 
-    def gated_regression(self, last_h, regression_gate, regression_transform):
+    def gated_regression(self, last_h, initial_node_representations, regression_gate, regression_transform, is_edge_regr=False):
         raise Exception("Models have to implement gated_regression!")
 
     def prepare_specific_graph_model(self) -> None:
         raise Exception("Models have to implement prepare_specific_graph_model!")
 
-    def compute_final_node_representations(self) -> tf.Tensor:
+    def compute_final_node_representations(self, initial_node_representations) -> tf.Tensor:
         raise Exception("Models have to implement compute_final_node_representations!")
 
     def make_minibatch_iterator(self, data: Any, is_training: bool):
@@ -555,7 +559,8 @@ class ChemModel(object):
                                 'sentences_id', 'word_inputs',
                                 'target_pos',
                                 'computed_values_edges', 'labels_edges',
-                                'node_mask_edges', 'word_embeddings']
+                                'node_mask_edges', 'word_embeddings',
+                                'emb_dropout_keep_prob']
 
             fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
                           self.ops['loss_edges'],self.ops['labels'], self.ops['computed_values'],
@@ -565,7 +570,8 @@ class ChemModel(object):
                           self.placeholders['sentences_id'], self.ops['word_inputs'],
                           self.placeholders['target_pos'],
                           self.ops['computed_values_edges'], self.placeholders['target_values_edges'],
-                          self.placeholders['node_mask_edges'], self.weights['word_embeddings']
+                          self.placeholders['node_mask_edges'], self.weights['word_embeddings'],
+                          self.placeholders['emb_dropout_keep_prob']
                           ]
 
             index_d = {fetch_list_names[i]: i for i in range(len(fetch_list_names))}
@@ -597,6 +603,7 @@ class ChemModel(object):
             labels_edges = result[index_d['labels_edges']]
             node_mask_edges = result[index_d['node_mask_edges']]
             word_embeddings = result[index_d['word_embeddings']]
+            emb_dropout_keep_prob = result[index_d['emb_dropout_keep_prob']]
 
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             if not self.params.get('is_test'):

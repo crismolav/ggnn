@@ -221,47 +221,73 @@ class DenseGGNNChemModel(ChemModel):
                                                  state_keep_prob=self.placeholders['graph_state_keep_prob'])
             self.weights['node_gru'] = cell
 
-    def get_initial_node_representation(self, h_dim, p_em, l_em, w_em):
+    def random_mask(self, prob, mask_shape, dtype=tf.float32):
+        """Random mask."""
+
+        rand = tf.random.uniform(mask_shape)
+        ones = tf.ones(mask_shape, dtype=dtype)
+        zeros = tf.zeros(mask_shape, dtype=dtype)
+        prob = tf.ones(mask_shape) * prob
+        return tf.where(rand < prob, ones, zeros)
+
+    def dropout(self, inputs, embed_keep_prob):
+        if embed_keep_prob != 1:
+            ph = tf.unstack(inputs, axis=-1)[0]
+            # ph = tf.shape(inputs)[-1]
+            last_dim = len(inputs.get_shape().as_list()) - 1
+            drop_mask = tf.expand_dims(self.random_mask(embed_keep_prob, tf.shape(ph)), last_dim)
+            # print("mask: %s " % drop_mask)
+            inputs *= drop_mask
+        return inputs
+
+    def get_initial_node_representation(self):
         if self.args['--pr'] in ['btb']:
+            h_dim = self.params['hidden_size']
+            dropout_keep_prob = self.placeholders['emb_dropout_keep_prob']
             word_inputs = self.placeholders['word_inputs']  # [b, v, 2]
             loc_inputs = tf.nn.embedding_lookup(
                 self.weights['loc_embeddings'], word_inputs[:, :, 0])
-            loc_inputs = tf.nn.dropout(loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob'])) # we use placeholders so that it can change when it's validation
+            loc_inputs = self.dropout(
+                loc_inputs, dropout_keep_prob) # we use placeholders so that it can change when it's validation
             # BTB: [b, v, l_em]
             pos_inputs = tf.nn.embedding_lookup(
                 self.weights['pos_embeddings'], word_inputs[:, :, 1])
-            pos_inputs = tf.nn.dropout(pos_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            pos_inputs = self.dropout(
+                pos_inputs, dropout_keep_prob)
             # BTB: [b, v, p_em]
             word_index_inputs = tf.nn.embedding_lookup(
                 self.weights['word_embeddings'], word_inputs[:, :, 2])
-            word_index_inputs = tf.nn.dropout(word_index_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            word_index_inputs = self.dropout(
+                word_index_inputs, dropout_keep_prob)
             # BTB: [b, v, w_em]
             head_loc_inputs = tf.nn.embedding_lookup(
                 self.weights['loc_embeddings'], word_inputs[:, :, 3])
-            head_loc_inputs = tf.nn.dropout(head_loc_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            head_loc_inputs = self.dropout(
+                head_loc_inputs, dropout_keep_prob)
             # BTB: [b, v, l_em]
             head_pos_inputs = tf.nn.embedding_lookup(
                 self.weights['pos_embeddings'], word_inputs[:, :, 4])
-            head_pos_inputs = tf.nn.dropout(head_pos_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            head_pos_inputs = self.dropout(
+                head_pos_inputs, dropout_keep_prob)
             # not used didn't seem useful
             # BTB: [b, v, p_em]
-
             edges_inputs = tf.nn.embedding_lookup(
                 self.weights['edge_embeddings'], word_inputs[:, :, 5])
-            edges_inputs = tf.nn.dropout(edges_inputs, 1 - (self.placeholders['emb_dropout_keep_prob']))
+            edges_inputs = self.dropout(
+                edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
 
-            word_inputs = tf.concat(
+            word_inputs_e = tf.concat(
                 [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
-            word_inputs = tf.pad(word_inputs, [[0, 0], [0, 0], [0, h_dim - word_inputs.shape[-1]]],
+            word_inputs_e = tf.pad(word_inputs_e, [[0, 0], [0, 0], [0, h_dim - word_inputs_e.shape[-1]]],
                                  mode='constant')
             # BTB: [b, v, h]
-            return word_inputs
+            return word_inputs_e
         else:
             return self.placeholders['initial_node_representation']
 
-    def compute_final_node_representations(self) -> tf.Tensor:
+    def compute_final_node_representations(self, initial_node_representations) -> tf.Tensor:
         v = self.placeholders['num_vertices']
         e = self.num_edge_types
         b = self.placeholders['num_graphs']
@@ -269,7 +295,7 @@ class DenseGGNNChemModel(ChemModel):
         p_em = self.pos_embedding_size
         l_em = self.loc_embedding_size
         w_em = self.word_embedding_size
-        h = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
+        h = initial_node_representations
         # BTB: [b * v, h] ID: [e, b, v, h] else : [b, v, h]    v' main dimension
         self.ops['word_inputs'] = h
         h = tf.reshape(h, [-1, h_dim])
@@ -379,7 +405,7 @@ class DenseGGNNChemModel(ChemModel):
         self.ops['_am'] = tf.identity(self.__adjacency_matrix)
         return acts
 
-    def gated_regression(self, last_h, regression_gate, regression_transform, is_edge_regr=False):
+    def gated_regression(self, last_h, initial_node_representations, regression_gate, regression_transform, is_edge_regr=False):
         # last_h ID [e, b, v, h] else [b, v, h]
         b = self.placeholders['num_graphs']
         e = self.num_edge_types
@@ -389,10 +415,8 @@ class DenseGGNNChemModel(ChemModel):
         p_em = self.pos_embedding_size
         l_em = self.loc_embedding_size
         w_em = self.word_embedding_size
-
-        initial_node_representation = self.get_initial_node_representation(h_dim, p_em, l_em, w_em)
         # ID [e, b, v, h] else [b, v, h]
-        gate_input = tf.concat([last_h, initial_node_representation], axis = -1)
+        gate_input = tf.concat([last_h, initial_node_representations], axis = -1)
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
