@@ -231,13 +231,16 @@ class DenseGGNNChemModel(ChemModel):
         return tf.where(rand < prob, ones, zeros)
 
     def dropout(self, inputs, embed_keep_prob):
-        if embed_keep_prob != 1:
-            ph = tf.unstack(inputs, axis=-1)[0]
-            # ph = tf.shape(inputs)[-1]
-            last_dim = len(inputs.get_shape().as_list()) - 1
-            drop_mask = tf.expand_dims(self.random_mask(embed_keep_prob, tf.shape(ph)), last_dim)
-            # print("mask: %s " % drop_mask)
-            inputs *= drop_mask
+        if True:
+            if embed_keep_prob != 1:
+                ph = tf.unstack(inputs, axis=-1)[0]
+                # ph = tf.shape(inputs)[-1]
+                last_dim = len(inputs.get_shape().as_list()) - 1
+                drop_mask = tf.expand_dims(self.random_mask(embed_keep_prob, tf.shape(ph)), last_dim)
+                # print("mask: %s " % drop_mask)
+                inputs *= drop_mask
+        else:
+            pass  
         return inputs
 
     def get_initial_node_representation(self):
