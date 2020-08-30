@@ -714,9 +714,9 @@ class ChemModel(object):
                 with open(self.log_file, 'w') as f:
                     json.dump(log_to_save, f, indent=4)
 
-                # val_acc = train_loss
+                val_acc = train_loss
                 #TODO: reconsider this change, we are now using loss as accuracy
-                val_acc = 1-valid_las
+                # val_acc = 1-valid_las
                 # if val_acc < best_val_acc:
 
                 ##here look at train_las and print valid las
