@@ -33,7 +33,7 @@ def get_train_and_validation_files(args):
             train_file = 'en-wsj-std-dev-stanford-3.3.0-tagged_id.json'
             valid_file = 'en-wsj-std-test-stanford-3.3.0-tagged_id.json' if not args.get('--test_with_train') else train_file
 
-    elif args.get('--pr') == 'btb':
+    elif args.get('--pr') in ['btb', 'btb_w']:
         if args.get('--train_with_dev'):
             if args.get('--input_tree_bank') == 'nivre':
                 train_file = 'en-wsj-ym-nivre-dev_btb.json'
@@ -77,7 +77,7 @@ class ChemModel(object):
     def get_id_params(self):
         train_file, valid_file = get_train_and_validation_files(self.args)
         test_file = get_test_file(self.args)
-        if self.args['--pr'] in ['identity', 'btb']:
+        if self.args['--pr'] in ['identity', 'btb', 'btb_w']:
             output_size = 150
         else:
             output_size = 1
@@ -267,7 +267,7 @@ class ChemModel(object):
         return self.process_raw_graphs(data, is_training_data)
 
     def get_annotation_size(self, data):
-        if self.args['--pr'] in ['btb']:
+        if self.args['--pr'] in ['btb', 'btb_w']:
             return len(self.pos_list)
         else:
             return max(self.annotation_size, len(data[0]["node_features"][0]))
@@ -293,7 +293,7 @@ class ChemModel(object):
                 tf.float32, [None, None, self.num_edge_types, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
                 tf.float32, [self.num_edge_types, None], name='target_mask')
-        elif self.args['--pr'] in ['btb']:
+        elif self.args['--pr'] in ['btb', 'btb_w']:
             self.placeholders['target_values_head'] = tf.compat.v1.placeholder(
                 tf.float32, [None, None], name='target_values')
             self.placeholders['target_mask'] = tf.compat.v1.placeholder(
@@ -340,7 +340,7 @@ class ChemModel(object):
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
                 # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
-                if self.args['--pr'] in ['btb']:
+                if self.args['--pr'] in ['btb', 'btb_w']:
                     computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
                                                                   self.ops[ 'initial_node_representations'],
                                                                   self.weights['regression_gate_task_edges%i' % task_id],
@@ -362,7 +362,7 @@ class ChemModel(object):
                     # node_mask ID [b, e * v * o]
                     mask = tf.transpose(a=self.placeholders['node_mask'])  # [e * v * o,b]
                     # ID: [e * v * o,b]
-                elif self.args['--pr'] in ['btb']:
+                elif self.args['--pr'] in ['btb', 'btb_w']:
                     labels = self.placeholders['target_values_head']  # [b, v * o]
                     mask = self.placeholders['node_mask'] #[b, v * o]
                     labels_edges = self.placeholders['target_values_edges']  # [b, v * e]
@@ -389,7 +389,7 @@ class ChemModel(object):
                 if  self.args['--pr'] == 'molecule':
                     self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
                 else:
-                    if self.args['--pr'] == 'btb':
+                    if self.args['--pr'] in ['btb', 'btb_w']:
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))/task_target_num
                         # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
@@ -407,7 +407,8 @@ class ChemModel(object):
                     self.ops['computed_values'] = computed_values
                     self.ops['computed_values_edges'] = computed_values_edges
                     self.ops['labels'] = labels
-                    self.ops['node_mask'] = tf.transpose(mask) if self.args['--pr'] != 'btb' else mask
+                    self.ops['node_mask'] = tf.transpose(mask) \
+                        if self.args['--pr'] not in ['btb', 'btb_w'] else mask
                     self.ops['task_target_mask'] = task_target_mask
 
         self.ops['loss'] = tf.reduce_sum(input_tensor=self.ops['losses'])
