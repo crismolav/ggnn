@@ -77,7 +77,7 @@ class ChemModel(object):
     def get_id_params(self):
         train_file, valid_file = get_train_and_validation_files(self.args)
         test_file = get_test_file(self.args)
-        if self.args['--pr'] in ['identity', 'btb', 'btb_w']:
+        if self.args['--pr'] in ['identity', 'btb']:
             output_size = 150
         else:
             output_size = 1
@@ -85,7 +85,7 @@ class ChemModel(object):
             "--input_tree_bank") is not None else 'std'
         assert input_tree_bank in ['nivre', 'std']
         return {
-            'batch_size': 20,
+            'batch_size': 1,
             'num_epochs': 200,
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),

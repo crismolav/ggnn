@@ -595,7 +595,7 @@ class DenseGGNNChemModel(ChemModel):
     def get_mask(self, n_active_nodes, chosen_bucket_size, is_edge = False):
         #TODO:test
         #n_active_nodes is the real number of vertices in the sentence
-        if self.args['--pr'] in ['identity', 'btb', 'btb_w']:
+        if self.args['--pr'] in ['identity', 'btb']:
             e_o = self.output_size_edges
             v = chosen_bucket_size
             o = self.params['output_size']
@@ -694,9 +694,46 @@ class DenseGGNNChemModel(ChemModel):
         return new_annotations
 
     def make_batch(self, elements):
+        if self.args['--pr'] == 'btb_w':
+            return self.make_batch_btb_w(elements)
+        else:
+            return self.make_batch_btb_others(elements)
+
+    def make_batch_btb_w(self, elements):
+        batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
+                      'node_mask_edges': [], 'sentences_id': [],
+                      'words_pos': [], 'words_loc': [], 'words_index': [],
+                      'words_head': [], 'words_head_pos': [], 'edges_index': [],
+                      'target_pos': [], 'inputs': []}
+
+        for data in elements:
+            inputs = adj_mat_to_target(data['adj_mat'])
+
+            for i, input in enumerate(inputs):
+                adj_m = data['adj_mat'][:, i, :]
+                label = data['labels'][:, i, :]
+                batch_data['adj_mat'].append(data['adj_mat'])
+                batch_data['init'].append(data['init'])
+                batch_data['node_mask'].append(data['mask'])
+                batch_data['node_mask_edges'].append(data['mask_edges'])  # [b, v * e]
+                # batch_data['softmax_mask'].append(d['softmax_mask'])
+                batch_data['sentences_id'].append(data['id'])
+                batch_data['words_pos'].append(data['words_pos'])
+                batch_data['words_loc'].append(data['words_loc'])
+                batch_data['words_index'].append(data['words_index'])
+                batch_data['words_head'].append(data['words_head'])
+                batch_data['words_head_pos'].append(data['words_head_pos'])
+                batch_data['edges_index'].append(data['edges_index'])
+                batch_data['target_pos'].append(data['target_pos'])
+                batch_data['labels'].append(label)
+                batch_data['inputs'].append(adj_m)
+
+        return batch_data
+
+    def make_batch_btb_others(self, elements):
         batch_data = {'adj_mat': [], 'init': [], 'labels': [], 'node_mask': [],
                       'node_mask_edges': [], 'task_masks': [], 'sentences_id': [],
-                      'words_pos':[], 'words_loc':[], 'words_index': [],
+                      'words_pos': [], 'words_loc': [], 'words_index': [],
                       'words_head': [], 'words_head_pos': [], 'edges_index': [],
                       'target_pos': []}
         for d in elements:
@@ -704,7 +741,7 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['adj_mat'].append(d['adj_mat'])
             batch_data['init'].append(d['init'])
             batch_data['node_mask'].append(d['mask'])
-            batch_data['node_mask_edges'].append(d['mask_edges']) # [b, v * e]
+            batch_data['node_mask_edges'].append(d['mask_edges'])  # [b, v * e]
             # batch_data['softmax_mask'].append(d['softmax_mask'])
             batch_data['sentences_id'].append(d['id'])
             batch_data['words_pos'].append(d['words_pos'])
@@ -714,10 +751,9 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['words_head_pos'].append(d['words_head_pos'])
             batch_data['edges_index'].append(d['edges_index'])
             batch_data['target_pos'].append(d['target_pos'])
-
             target_task_values = []
             target_task_mask = []
-            for target_val in d['labels']: # else: [1]
+            for target_val in d['labels']:  # else: [1]
                 if target_val is None:  # This is one of the examples we didn't sample...
                     target_task_values.append(0.)
                     target_task_mask.append(0.)
@@ -728,7 +764,7 @@ class DenseGGNNChemModel(ChemModel):
             batch_data['task_masks'].append(target_task_mask)
 
         if self.args['--pr'] in ['identity']:
-            #batch_data['node_mask'] BTB [b, e * v, v] ID [b, e * v, o]
+            # batch_data['node_mask'] BTB [b, e * v, v] ID [b, e * v, o]
             batch_data['node_mask'] = np.reshape(
                 batch_data['node_mask'], [len(elements), -1])
 
@@ -746,7 +782,6 @@ class DenseGGNNChemModel(ChemModel):
             end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
             elements = bucketed[bucket][start_idx:end_idx]
             batch_data = self.make_batch(elements)
-
             num_graphs = len(batch_data['init'])
             avg_num += num_graphs
 
@@ -772,20 +807,13 @@ class DenseGGNNChemModel(ChemModel):
             batch_data = self.make_batch(elements)
 
             num_graphs = len(batch_data['init'])
-            initial_representations = batch_data['init']
-
-            initial_representations = self.pad_annotations(
-                initial_representations, chosen_bucket_size=bucket_sizes[bucket],
-                adj_mat=batch_data['adj_mat'], sentences_id=batch_data['sentences_id'],
-                words_pos=batch_data['words_pos'])
-            #ID: [e, b, v, h] else [b, v, h]
-
             # batch_data['labels'] [b, e, v', v]
             target_values = self.get_target_values_formatted(
                 labels=batch_data['labels'], no_labels=True)
-            # BTB [b, v * o] ID: [o, v, e, b]
+            # BTB [b, v * o] BTB_w: [b, v] ID: [o, v, e, b]
             target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
             # [b, v * e]
+            set_trace()
             loc_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_loc'], b=num_graphs, v=bucket_sizes[bucket])
             pos_inputs = self.get_word_inputs_padded(
@@ -811,8 +839,7 @@ class DenseGGNNChemModel(ChemModel):
                 #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
                 self.placeholders['target_values_edges']: target_values_edges,
                 # [b, v * e]
-                self.placeholders['target_mask']: np.transpose(batch_data['task_masks'], axes=[1, 0]),
-                #BTB [v, b] ID [v, b] else: [1, b]
+
                 self.placeholders['num_graphs']: num_graphs,
                 self.placeholders['num_vertices']: bucket_sizes[bucket],
                 self.placeholders['adjacency_matrix']: batch_data['adj_mat'],
@@ -830,9 +857,19 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['target_pos']: target_pos
                 # [b, v]
             }
+            set_trace()
             if self.args['--pr'] not in ['btb', 'btb_w']:
+                initial_representations = batch_data['init']
+                initial_representations = self.pad_annotations(
+                    initial_representations, chosen_bucket_size=bucket_sizes[bucket],
+                    adj_mat=batch_data['adj_mat'], sentences_id=batch_data['sentences_id'],
+                    words_pos=batch_data['words_pos'])
+                # ID: [e, b, v, h] else [b, v, h]
                 batch_feed_dict[self.placeholders['initial_node_representation']] = initial_representations,
                 # ID: [e, b, v, h] else [b, v, h]
+                batch_feed_dict[self.placeholders['target_mask']] = np.transpose(
+                    batch_data['task_masks'], axes=[1, 0])
+                # BTB [v, b] ID [v, b] else: [1, b]
             bucket_counters[bucket] += 1
 
             avg_num += num_graphs
@@ -858,9 +895,10 @@ class DenseGGNNChemModel(ChemModel):
         return new_labels
 
     def get_target_values_formatted(self, labels, no_labels=True):
-        if self.args['--pr'] in ['btb', 'btb_w']:
+        if self.args['--pr'] in ['btb']:
             # labels [b, e, v', v]
             o = self.params['output_size']
+            set_trace()
             b, e, v, _ = np.array(labels).shape
 
             new_labels = np.transpose(labels, axes=[0, 2, 1, 3]) # BTB [b, v', e, v]
@@ -873,6 +911,12 @@ class DenseGGNNChemModel(ChemModel):
             new_labels = np.reshape(new_labels, [b, v * o])   # [b, v * o]
 
             return new_labels
+        elif self.args['--pr'] in ['btb_w']:
+            # labels [b, e, v']
+            new_labels = np.transpose(labels, axes=[0, 2, 1]) # [b, v', e]
+            new_labels = np.sum(new_labels, axis=2) # [b, v']
+
+            return new_labels #[b, v']
         else:
             return np.transpose(np.array(labels))
 
