@@ -810,10 +810,9 @@ class DenseGGNNChemModel(ChemModel):
             # batch_data['labels'] [b, e, v', v]
             target_values = self.get_target_values_formatted(
                 labels=batch_data['labels'], no_labels=True)
-            # BTB [b, v * o] BTB_w: [b, v] ID: [o, v, e, b]
+            # BTB [b, v * o]  BTB_w: [b, v] ID: [o, v, e, b]
             target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
-            # [b, v * e]
-            set_trace()
+            #  BTB [b, v * e] BTB_w: [b, e]
             loc_inputs = self.get_word_inputs_padded(
                 words_pos=batch_data['words_loc'], b=num_graphs, v=bucket_sizes[bucket])
             pos_inputs = self.get_word_inputs_padded(
@@ -834,6 +833,7 @@ class DenseGGNNChemModel(ChemModel):
             word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
                                     head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
             # [b, v, 6]
+
             batch_feed_dict = {
                 self.placeholders['target_values_head']: target_values,
                 #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
@@ -857,7 +857,6 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['target_pos']: target_pos
                 # [b, v]
             }
-            set_trace()
             if self.args['--pr'] not in ['btb', 'btb_w']:
                 initial_representations = batch_data['init']
                 initial_representations = self.pad_annotations(
@@ -884,21 +883,26 @@ class DenseGGNNChemModel(ChemModel):
         return pos_inputs
 
     def get_target_values_edges_formatted(self, labels):
-        o = self.output_size_edges
-        b, e, v, _ = np.array(labels).shape
+        if self.args['--pr'] in ['btb']:
+            o = self.output_size_edges
+            b, e, v, _ = np.array(labels).shape
 
-        new_labels = np.transpose(labels, axes=[0, 2, 1, 3])  #  [b, v', e, v]
-        new_labels = np.sum(new_labels, axis=3) #  [b, v', e]
+            new_labels = np.transpose(labels, axes=[0, 2, 1, 3])  #  [b, v', e, v]
+            new_labels = np.sum(new_labels, axis=3) #  [b, v', e]
+            new_labels = np.reshape(new_labels, [b, v * e])  # BTB [b, v' * e]
 
-        new_labels = np.reshape(new_labels, [b, v * e])  # BTB [b, v' * e]
+        elif self.args['--pr'] in ['btb_w']:
+            # labels [b, e, v']
+            new_labels = np.sum(labels, axis=2)  # [b, e]
 
+        else:
+            new_labels = []
         return new_labels
 
     def get_target_values_formatted(self, labels, no_labels=True):
         if self.args['--pr'] in ['btb']:
             # labels [b, e, v', v]
             o = self.params['output_size']
-            set_trace()
             b, e, v, _ = np.array(labels).shape
 
             new_labels = np.transpose(labels, axes=[0, 2, 1, 3]) # BTB [b, v', e, v]
@@ -913,8 +917,7 @@ class DenseGGNNChemModel(ChemModel):
             return new_labels
         elif self.args['--pr'] in ['btb_w']:
             # labels [b, e, v']
-            new_labels = np.transpose(labels, axes=[0, 2, 1]) # [b, v', e]
-            new_labels = np.sum(new_labels, axis=2) # [b, v']
+            new_labels = np.sum(labels, axis=1) # [b, v']
 
             return new_labels #[b, v']
         else:

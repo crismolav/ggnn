@@ -348,9 +348,12 @@ class ChemModel(object):
                                                                   is_edge_regr=True)
                     # [b, v * e]
 
-                task_target_mask = self.placeholders['target_mask'][internal_id, :]
+                # task_target_mask = self.placeholders['target_mask'][internal_id, :]
                 # ID [b] else: [b]
-                task_target_num = tf.reduce_sum(input_tensor=task_target_mask) + SMALL_NUMBER
+
+                # task_target_num = tf.reduce_sum(input_tensor=task_target_mask) + SMALL_NUMBER
+                task_target_num = tf.dtypes.cast(self.placeholders['num_graphs'], tf.float32)
+
                 # ID and else: b
                 if self.args['--pr'] == 'molecule':
                     labels = self.placeholders['target_values'][internal_id, :]
@@ -409,7 +412,6 @@ class ChemModel(object):
                     self.ops['labels'] = labels
                     self.ops['node_mask'] = tf.transpose(mask) \
                         if self.args['--pr'] not in ['btb', 'btb_w'] else mask
-                    self.ops['task_target_mask'] = task_target_mask
 
         self.ops['loss'] = tf.reduce_sum(input_tensor=self.ops['losses'])
         self.ops['loss_edges'] = tf.reduce_sum(input_tensor=self.ops['losses_edges'])
