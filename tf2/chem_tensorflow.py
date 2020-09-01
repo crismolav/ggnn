@@ -185,7 +185,7 @@ class ChemModel(object):
         self.loc_embedding_size  = 80
         self.word_embedding_size = 100
         self.edge_embedding_size = 50
-        self.target_node_embedding_size = 20
+        self.target_node_embedding_size = 10
 
         self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['input_tree_bank'])
@@ -394,9 +394,14 @@ class ChemModel(object):
                 if  self.args['--pr'] == 'molecule':
                     self.calculate_losses_for_molecules(computed_values, internal_id, task_id)
                 else:
-                    if self.args['--pr'] in ['btb', 'btb_w']:
+                    if self.args['--pr'] in ['btb']:
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))/task_target_num
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))/task_target_num
+                        # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
+                        task_loss = (task_loss_heads + task_loss_edges)
+                    elif self.args['--pr'] in ['btb_w']:
+                        task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))
+                        task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))
                         # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
                         task_loss = (task_loss_heads + task_loss_edges)
                     else:
@@ -565,7 +570,7 @@ class ChemModel(object):
                                 'target_pos',
                                 'computed_values_edges', 'labels_edges',
                                 'node_mask_edges', 'word_embeddings',
-                                'emb_dropout_keep_prob']
+                                'target_node_embeddings']
 
             fetch_list = [self.ops['loss'], accuracy_ops, self.ops['summary'],
                           self.ops['loss_edges'],self.ops['labels'], self.ops['computed_values'],
@@ -576,7 +581,7 @@ class ChemModel(object):
                           self.placeholders['target_pos'],
                           self.ops['computed_values_edges'], self.placeholders['target_values_edges'],
                           self.placeholders['node_mask_edges'], self.weights['word_embeddings'],
-                          self.placeholders['emb_dropout_keep_prob']
+                          self.weights['target_node_embeddings']
                           ]
 
             index_d = {fetch_list_names[i]: i for i in range(len(fetch_list_names))}
@@ -608,7 +613,7 @@ class ChemModel(object):
             labels_edges = result[index_d['labels_edges']]
             node_mask_edges = result[index_d['node_mask_edges']]
             word_embeddings = result[index_d['word_embeddings']]
-            emb_dropout_keep_prob = result[index_d['emb_dropout_keep_prob']]
+            target_node_embeddings = result[index_d['target_node_embeddings']]
 
             (batch_loss, batch_accuracies, batch_summary) = (result[0], result[1], result[2])
             if not self.params.get('is_test'):
