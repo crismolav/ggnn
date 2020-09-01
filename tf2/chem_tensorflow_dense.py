@@ -199,8 +199,13 @@ class DenseGGNNChemModel(ChemModel):
             tf.float32, [None, None], name='softmax_mask')
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
-        self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
-            tf.int32, [None, None, 7], name='word_inputs')
+
+        if self.args['--pr'] in ['btb']:
+            self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
+                tf.int32, [None, None, 6], name='word_inputs')
+        elif self.args['--pr'] in ['btb_w']:
+            self.placeholders['word_inputs'] = tf.compat.v1.placeholder(
+                tf.int32, [None, None, 7], name='word_inputs')
         # [b, v, 6]
         self.placeholders['target_pos'] = tf.compat.v1.placeholder(
             tf.int32, [None, None], name='target_pos')
@@ -306,14 +311,18 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = self.dropout(
                 edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
-            target_node_inputs = tf.nn.embedding_lookup(
-                self.weights['target_node_embeddings'], word_inputs[:, :, 6])
-            target_node_inputs = self.dropout(
-                target_node_inputs, dropout_keep_prob)
-            # BTB: [b, v, e_em]
             word_inputs_e = tf.concat(
-                [target_node_inputs, loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
+                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
+            if self.args['--pr'] in ['btb_w']:
+                target_node_inputs = tf.nn.embedding_lookup(
+                    self.weights['target_node_embeddings'], word_inputs[:, :, 6])
+                target_node_inputs = self.dropout(
+                    target_node_inputs, dropout_keep_prob)
+                word_inputs_e = tf.concat(
+                    [target_node_inputs, word_inputs_e], 2)
+                # BTB: [b, v, t_em]
+
             word_inputs_e = tf.pad(word_inputs_e, [[0, 0], [0, 0], [0, h_dim - word_inputs_e.shape[-1]]],
                                  mode='constant')
             # BTB: [b, v, h]
@@ -868,31 +877,13 @@ class DenseGGNNChemModel(ChemModel):
             target_values = self.get_target_values_formatted(
                 labels=batch_data['labels'], no_labels=True)
             # BTB [b, v * o]  BTB_w: [b, v] ID: [o, v, e, b]
-            target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
+            target_values_edges = self.get_target_values_edges_formatted(
+                labels=batch_data['labels'])
             #  BTB [b, v * e] BTB_w: [b, e]
-            loc_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['words_loc'], b=num_graphs, v=bucket_sizes[bucket])
-            pos_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['words_pos'], b=num_graphs, v=bucket_sizes[bucket])
-            word_id_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['words_index'], b=num_graphs, v=bucket_sizes[bucket])
-            head_loc_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['words_head'], b=num_graphs, v=bucket_sizes[bucket])
-            head_pos_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['words_head_pos'], b=num_graphs, v=bucket_sizes[bucket])
-            edges_inputs = self.get_word_inputs_padded(
-                words_pos=batch_data['edges_index'], b=num_graphs, v=bucket_sizes[bucket])
-            # [b, v]
             target_pos = self.get_word_inputs_padded(
                 words_pos=batch_data['target_pos'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
-            #this is for btb_w
-            target_node = self.get_word_inputs_padded(
-                words_pos=batch_data['target_node'], b=num_graphs, v=bucket_sizes[bucket])
-            # [b, v]
-
-            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
-                                    head_loc_inputs, head_pos_inputs, edges_inputs, target_node), axis=2)
+            word_inputs = self.get_all_word_inputs(batch_data=batch_data, v=bucket_sizes[bucket])
             # [b, v, 7]
             batch_feed_dict = {
                 self.placeholders['target_values_head']: target_values,
@@ -936,12 +927,7 @@ class DenseGGNNChemModel(ChemModel):
             yield batch_feed_dict
     def get_all_word_inputs(self, batch_data, v):
         num_graphs = len(batch_data['init'])
-        #bucket_sizes[bucket]
-        target_values = self.get_target_values_formatted(
-            labels=batch_data['labels'], no_labels=True)
-        # BTB [b, v * o]  BTB_w: [b, v] ID: [o, v, e, b]
-        target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
-        #  BTB [b, v * e] BTB_w: [b, e]
+
         loc_inputs = self.get_word_inputs_padded(
             words_pos=batch_data['words_loc'], b=num_graphs, v=v)
         pos_inputs = self.get_word_inputs_padded(
@@ -955,16 +941,18 @@ class DenseGGNNChemModel(ChemModel):
         edges_inputs = self.get_word_inputs_padded(
             words_pos=batch_data['edges_index'], b=num_graphs, v=v)
         # [b, v]
-        target_pos = self.get_word_inputs_padded(
-            words_pos=batch_data['target_pos'], b=num_graphs, v=v)
-        # [b, v]
-        # this is for btb_w
-        target_node = self.get_word_inputs_padded(
-            words_pos=batch_data['target_node'], b=num_graphs, v=v)
-        # [b, v]
         word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
-                                head_loc_inputs, head_pos_inputs, edges_inputs, target_node),
+                                head_loc_inputs, head_pos_inputs, edges_inputs),
                                axis=2)
+        # [b, v, 6]
+        if self.args['--pr'] in ['btb_w']:
+            target_node = self.get_word_inputs_padded(
+                words_pos=batch_data['target_node'], b=num_graphs, v=v)
+            # [b, v]
+            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
+                                    head_loc_inputs, head_pos_inputs,
+                                    edges_inputs, target_node), axis=2)
+        return word_inputs
 
     def get_word_inputs_padded(self, words_pos, b, v):
         pos_inputs = np.zeros([b, v])
