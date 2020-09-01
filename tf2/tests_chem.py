@@ -93,6 +93,7 @@ class ChemTests(unittest.TestCase):
         model.num_edge_types = 2
         model.params = {}
         model.params['output_size'] = 4
+        model.output_size_edges = 2
         chosen_bucket_size = 3
         n_active_nodes = 2
 
@@ -113,6 +114,7 @@ class ChemTests(unittest.TestCase):
         model.num_edge_types = 2
         model.params = {}
         model.params['output_size'] = 4
+        model.output_size_edges = 2
         chosen_bucket_size = 3
         n_active_nodes = 2
 
@@ -128,7 +130,8 @@ class ChemTests(unittest.TestCase):
         model = chem_tfd.DenseGGNNChemModel(args)
         model.num_edge_types = 2
         model.params = {}
-        model.params['output_size'] = 4
+        model.params['output_size']  = 4
+        model.output_size_edges = 2
         chosen_bucket_size = 3
         n_active_nodes = 2
 
@@ -147,11 +150,33 @@ class ChemTests(unittest.TestCase):
 
         self.assertTrue(expected, result)
 
+    def test_vector_to_target_head(self):
+        vector = np.array(
+            [0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+             0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+             0., 0., 0., 0.])
+        result = chem_tfd.vector_to_target(
+            vector)
+        expected = [2, 0]
+
+        self.assertEqual(expected, result)
+
+    def test_vector_to_target_edge(self):
+        vector = np.array(
+            [0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+             0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+             0., 0., 0., 0.])
+        result = chem_tfd.vector_to_target(
+            vector, is_edge=True)
+        expected = [0, 3]
+
+        self.assertEqual(expected, result)
+
 if __name__ == "__main__":
     unittest.main()
     '''
     example of how to run
-    python tf2/tests_chem.py ChemTests
+            python tf2/tests_chem.py ChemTests
     '''
 
 

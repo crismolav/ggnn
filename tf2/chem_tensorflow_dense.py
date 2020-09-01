@@ -122,6 +122,30 @@ def adj_mat_to_target(adj_mat, is_probability=False, true_target=None):
 
     return graph
 
+def vector_to_target(vector, is_probability=False, is_edge=False):
+    graph = []
+
+    if np.amax(vector) == 0:
+        return []
+    if is_probability:
+        index = np.where(vector == np.amax(vector))
+    else:
+        index = np.where(vector == 1)
+    if len(index[0]) == 0:
+        return []
+    if len(index[0]) > 1:
+        pass
+        # print("adj matrix corrupted for node %d :(%d, %d, %d)"%(
+        #     node, true_target[node-1][0], true_target[node-1][1], node))
+    if is_edge:
+        e = index[0][0] + 1
+        src = 0
+    else:
+        e = 0
+        src = index[0][0]
+
+    return [src, e]
+
 
 '''
 Comments provide the expected tensor shapes where helpful.
@@ -176,7 +200,7 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['num_vertices'] = tf.compat.v1.placeholder(tf.int32, (), name='num_vertices')
         self.placeholders['sentences_id'] = tf.compat.v1.placeholder(tf.string, [None], name='sentences_id')
         self.placeholders['word_inputs']  = tf.compat.v1.placeholder(
-            tf.int32, [None, None, 6], name='word_inputs')
+            tf.int32, [None, None, 7], name='word_inputs')
         # [b, v, 6]
         self.placeholders['target_pos'] = tf.compat.v1.placeholder(
             tf.int32, [None, None], name='target_pos')
@@ -215,6 +239,10 @@ class DenseGGNNChemModel(ChemModel):
             'edge_embeddings', [self.num_edge_types +1 , self.edge_embedding_size],
             dtype=tf.float32)
 
+        self.weights['target_node_embeddings'] = tf.compat.v1.get_variable(
+            'target_node_embeddings', [2, self.target_node_embedding_size],
+            dtype=tf.float32)
+
         with tf.compat.v1.variable_scope("gru_scope"):
             cell = tf.compat.v1.nn.rnn_cell.GRUCell(h_dim)
             cell = tf.compat.v1.nn.rnn_cell.DropoutWrapper(cell,
@@ -246,7 +274,7 @@ class DenseGGNNChemModel(ChemModel):
         if self.args['--pr'] in ['btb', 'btb_w']:
             h_dim = self.params['hidden_size']
             dropout_keep_prob = self.placeholders['emb_dropout_keep_prob']
-            word_inputs = self.placeholders['word_inputs']  # [b, v, 2]
+            word_inputs = self.placeholders['word_inputs']  # [b, v, 6]
             loc_inputs = tf.nn.embedding_lookup(
                 self.weights['loc_embeddings'], word_inputs[:, :, 0])
             loc_inputs = self.dropout(
@@ -278,9 +306,13 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = self.dropout(
                 edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
-
+            target_node_inputs = tf.nn.embedding_lookup(
+                self.weights['target_node_embeddings'], word_inputs[:, :, 6])
+            target_node_inputs = self.dropout(
+                target_node_inputs, dropout_keep_prob)
+            # BTB: [b, v, e_em]
             word_inputs_e = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
+                [target_node_inputs, loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             word_inputs_e = tf.pad(word_inputs_e, [[0, 0], [0, 0], [0, h_dim - word_inputs_e.shape[-1]]],
                                  mode='constant')
@@ -458,13 +490,34 @@ class DenseGGNNChemModel(ChemModel):
             # self.ops['regression_transform'] = None
             # self.ops['regression_gate'] = regression_gate(gate_input)
             # self.ops['regression_transform'] = regression_transform(last_h)
-        elif self.args['--pr'] in ['btb', 'btb_w']:
+        elif self.args['--pr'] in ['btb']:
             # gated_outputs  [b * v, o]
             # node_mask [b, v * o]
             # node_mask_edge  [b, v * e]
             gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
-            softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, o]
-            softmax = tf.reshape(softmax, [b, v * output_n]) # [b, v * o]
+            if self.args['--pr'] in ['btb_w'] and is_edge_regr:
+                # gated_outputs = tf.reshape(softmax, [b, v, output_n]) # [b, v, o]
+                gated_outputs = tf.reduce_sum(gated_outputs, axis=1) # [b, o]
+                softmax = tf.nn.softmax(gated_outputs, axis=1)  # [b, o]
+            else:
+                softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, o]
+                softmax = tf.reshape(softmax, [b, v * output_n]) # [b, v * o]
+
+            self.output = softmax
+
+        elif self.args['--pr'] in ['btb_w']:
+            # gated_outputs  [b * v, 1]
+            # node_mask [b, v]
+            # node_mask_edge  [b, e]
+            if  is_edge_regr:
+                gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v]
+                # gated_outputs = tf.reshape(softmax, [b, v, output_n]) # [b, v, o]
+                gated_outputs = tf.reduce_sum(gated_outputs, axis=1) # [b, o]
+                softmax = tf.nn.softmax(gated_outputs, axis=1)  # [b, o]
+            else:
+                gated_outputs = tf.reshape(gated_outputs, [b, v])
+                softmax = tf.nn.softmax(gated_outputs, axis=1) # [b, v]
+
             self.output = softmax
 
         else:
@@ -558,9 +611,7 @@ class DenseGGNNChemModel(ChemModel):
                 index_vector[i] = 1
                 index_vector = np.pad(index_vector, pad_width=[0, self.bucket_max_nodes - v],
                                       mode='constant')
-
                 #Second we add the POS of each node
-
                 pos_vector = self.get_pos_vector(node_feature=node_feature)
                 # third we add the dep vector of each node
                 node_edge = graph_[i]
@@ -612,13 +663,16 @@ class DenseGGNNChemModel(ChemModel):
             output_zeros = np.zeros((final_mask.shape[0], o - n_active_nodes))
             final_mask = np.concatenate([final_mask, output_zeros], axis=-1) # (e_o * v, o)
 
-            if self.args['--pr'] in ['btb', 'btb_w']:
+            if self.args['--pr'] in ['btb']:
                 final_mask = np.reshape(final_mask, [e_o, v, o]) # BTB [e_o, v, o]
                 final_mask = np.transpose(final_mask, [1, 0, 2]) # BTB [v, e_o, o]
 
                 final_mask = np.mean(final_mask, axis=1)
                 final_mask = np.reshape(final_mask, [-1])
             return final_mask  # BTB [v * o] ID [e * v, o]
+        elif is_edge and self.args['--pr'] == 'btb_w':
+            e_o = self.output_size_edges
+            return [1. for _ in range(e_o)]
         else:
             return [1. for _ in range(n_active_nodes) ] + [0. for _ in range(chosen_bucket_size - n_active_nodes)]
 
@@ -704,18 +758,18 @@ class DenseGGNNChemModel(ChemModel):
                       'node_mask_edges': [], 'sentences_id': [],
                       'words_pos': [], 'words_loc': [], 'words_index': [],
                       'words_head': [], 'words_head_pos': [], 'edges_index': [],
-                      'target_pos': [], 'inputs': []}
+                      'target_pos': [], 'inputs': [], 'target_node': []}
 
         for data in elements:
             inputs = adj_mat_to_target(data['adj_mat'])
-
-            for i, input in enumerate(inputs):
+            active_nodes = len(inputs) + 1
+            for i in range(active_nodes):
                 adj_m = data['adj_mat'][:, i, :]
                 label = data['labels'][:, i, :]
                 batch_data['adj_mat'].append(data['adj_mat'])
                 batch_data['init'].append(data['init'])
                 batch_data['node_mask'].append(data['mask'])
-                batch_data['node_mask_edges'].append(data['mask_edges'])  # [b, v * e]
+                batch_data['node_mask_edges'].append(data['mask_edges'])  # [b, v * e] btb_w: [b, e]
                 # batch_data['softmax_mask'].append(d['softmax_mask'])
                 batch_data['sentences_id'].append(data['id'])
                 batch_data['words_pos'].append(data['words_pos'])
@@ -727,6 +781,9 @@ class DenseGGNNChemModel(ChemModel):
                 batch_data['target_pos'].append(data['target_pos'])
                 batch_data['labels'].append(label)
                 batch_data['inputs'].append(adj_m)
+                target_node_vector = [0] * active_nodes
+                target_node_vector[i] = 1
+                batch_data['target_node'].append(target_node_vector)
 
         return batch_data
 
@@ -829,11 +886,14 @@ class DenseGGNNChemModel(ChemModel):
             target_pos = self.get_word_inputs_padded(
                 words_pos=batch_data['target_pos'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
+            #this is for btb_w
+            target_node = self.get_word_inputs_padded(
+                words_pos=batch_data['target_node'], b=num_graphs, v=bucket_sizes[bucket])
+            # [b, v]
 
             word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
-                                    head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
-            # [b, v, 6]
-
+                                    head_loc_inputs, head_pos_inputs, edges_inputs, target_node), axis=2)
+            # [b, v, 7]
             batch_feed_dict = {
                 self.placeholders['target_values_head']: target_values,
                 #BTB [b, v  * o]  ID: [o, v, e, b] head [v, 1, b]
@@ -874,6 +934,37 @@ class DenseGGNNChemModel(ChemModel):
             avg_num += num_graphs
 
             yield batch_feed_dict
+    def get_all_word_inputs(self, batch_data, v):
+        num_graphs = len(batch_data['init'])
+        #bucket_sizes[bucket]
+        target_values = self.get_target_values_formatted(
+            labels=batch_data['labels'], no_labels=True)
+        # BTB [b, v * o]  BTB_w: [b, v] ID: [o, v, e, b]
+        target_values_edges = self.get_target_values_edges_formatted(labels=batch_data['labels'])
+        #  BTB [b, v * e] BTB_w: [b, e]
+        loc_inputs = self.get_word_inputs_padded(
+            words_pos=batch_data['words_loc'], b=num_graphs, v=v)
+        pos_inputs = self.get_word_inputs_padded(
+            words_pos=batch_data['words_pos'], b=num_graphs, v=v)
+        word_id_inputs = self.get_word_inputs_padded(
+            words_pos=batch_data['words_index'], b=num_graphs, v=v)
+        head_loc_inputs = self.get_word_inputs_padded(
+            words_pos=batch_data['words_head'], b=num_graphs, v=v)
+        head_pos_inputs = self.get_word_inputs_padded(
+            words_pos=batch_data['words_head_pos'], b=num_graphs, v=v)
+        edges_inputs = self.get_word_inputs_padded(
+            words_pos=batch_data['edges_index'], b=num_graphs, v=v)
+        # [b, v]
+        target_pos = self.get_word_inputs_padded(
+            words_pos=batch_data['target_pos'], b=num_graphs, v=v)
+        # [b, v]
+        # this is for btb_w
+        target_node = self.get_word_inputs_padded(
+            words_pos=batch_data['target_node'], b=num_graphs, v=v)
+        # [b, v]
+        word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
+                                head_loc_inputs, head_pos_inputs, edges_inputs, target_node),
+                               axis=2)
 
     def get_word_inputs_padded(self, words_pos, b, v):
         pos_inputs = np.zeros([b, v])
@@ -1065,7 +1156,7 @@ class DenseGGNNChemModel(ChemModel):
             mask_reshaped = mask
             return mask_reshaped, results_reshaped, targets_reshaped
 
-        elif self.args['--pr'] in ['btb', 'btb_w']:
+        elif self.args['--pr'] in ['btb']:
             e, v = self.output_size_edges, num_vertices
             # e_ = 1 if self.args.get('--no_labels') else e
             o = self.params['output_size']
@@ -1073,6 +1164,7 @@ class DenseGGNNChemModel(ChemModel):
             if is_edge:
                 # mask [b, v * e]
                 # targets [b, v * e]
+                # computed_values [b, v * e]
                 results_masked = np.multiply(computed_values, mask) # [b, v * e]
                 results_reshaped = np.reshape(results_masked, [-1, v, e, 1])  # [b, v, e, 1]
                 results_reshaped = np.transpose(results_reshaped, [0, 2, 1, 3]) # [b, e, v, 1]
@@ -1089,6 +1181,31 @@ class DenseGGNNChemModel(ChemModel):
                 results_reshaped = np.reshape(results_masked, [-1, 1 , v, o]) # [b, 1, v', o]
 
                 targets_reshaped = np.reshape(targets, [-1, 1 , v, o]) # [b, 1, v', o]
+                mask_reshaped = np.reshape(mask, [-1, 1 , v, o])
+
+            return mask_reshaped, results_reshaped, targets_reshaped
+
+        elif self.args['--pr'] in ['btb_w']:
+            e, v = self.output_size_edges, num_vertices
+            # e_ = 1 if self.args.get('--no_labels') else e
+            o = self.params['output_size']
+
+            if is_edge:
+                # mask [b, e]
+                # targets [b, e]
+                # computed_values [b, e]
+                results_masked = np.multiply(computed_values, mask) # [b, e]
+                results_reshaped = np.reshape(results_masked, [-1, e, 1, 1])  # [b, e, 1, 1]
+                targets_reshaped = np.reshape(targets, [-1, e, 1, 1])  # [b, e, 1, 1]
+                mask_reshaped = np.reshape(mask, [-1, e, 1, 1])  # [b, e, 1, 1]
+
+            else:
+                # computed_values [b, v * e * o_]
+                # mask [b, v * e * o_]
+                results_masked = np.multiply(computed_values, mask) # [b, v * 1 * 1]
+                results_reshaped = np.reshape(results_masked, [-1, 1 , v, o]) # [b, 1, v', 1]
+
+                targets_reshaped = np.reshape(targets, [-1, 1 , v, o]) # [b, 1, v', 1]
                 mask_reshaped = np.reshape(mask, [-1, 1 , v, o])
 
             return mask_reshaped, results_reshaped, targets_reshaped
@@ -1134,8 +1251,13 @@ class DenseGGNNChemModel(ChemModel):
     def humanize_batch_results(self, labels, computed_values, num_vertices, mask,
                                      ids=None, adms=None, labels_e=None, computed_values_e=None,
                                      mask_edges=None, word_inputs=None, target_pos=None, out_file=None):
-        if self.args['--pr'] in ['btb', 'btb_w']:
+        if self.args['--pr'] in ['btb']:
             acc_las, acc_uas, acc_uas_e = self.humanize_batch_results_btb(
+                labels=labels, computed_values=computed_values, num_vertices=num_vertices,
+                mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
+                mask_edges=mask_edges, word_inputs=word_inputs, target_pos=target_pos, out_file=out_file)
+        elif self.args['--pr'] in ['btb_w']:
+            acc_las, acc_uas, acc_uas_e = self.humanize_batch_results_btb_w(
                 labels=labels, computed_values=computed_values, num_vertices=num_vertices,
                 mask=mask, ids=ids, adms=adms, labels_e=labels_e, computed_values_e=computed_values_e,
                 mask_edges=mask_edges, word_inputs=word_inputs, target_pos=target_pos, out_file=out_file)
@@ -1171,6 +1293,68 @@ class DenseGGNNChemModel(ChemModel):
                 out_file.write("id %s target vs predicted: \n%s vs \n%s\n" % (
                 id, target_graph, result_graph))
 
+    def humanize_batch_results_btb_w(self, labels, computed_values, num_vertices,
+                                    mask, ids=None, adms=None, labels_e=None,
+                                    computed_values_e=None, mask_edges=None,
+                                    word_inputs=None, target_pos=None, out_file=None):
+        # labels, computed_values [b, v]
+        # labels_e, computed_values_e [b, e]
+        # adms [b, 2e, v, v]
+        computed_values = computed_values * mask
+        computed_values_e = computed_values_e * mask_edges
+        acc_las = 0
+        acc_uas = 0
+        acc_uas_e = 0
+        b = labels.shape[0]
+        e = self.num_edge_types
+        result_graph, target_graph = [], []
+        adm = adms[0][:e, :, :]
+        for i, result in enumerate(computed_values):
+            if i == 0:
+                continue
+            result_e = computed_values_e[i]
+            target = labels[i]
+            target_e = labels_e[i]
+            id = ids[i]
+
+            target_h = vector_to_target(vector=target)
+            target_e = vector_to_target(vector=target_e, is_edge=True)
+            target_t = [target_h[0], target_e[1]]
+
+            result_h = vector_to_target(
+                vector=result, is_probability=True)
+            result_e = vector_to_target(
+                vector=result_e, is_probability=True, is_edge=True)
+            result_t = [result_h[0], result_e[1]]
+
+            las, uas = self.get_las_uas_w(target_t, result_t)
+            _, uas_e = self.get_las_uas_w(target_e, result_e, is_edge=True)
+
+            acc_las += las
+            acc_uas += uas
+            acc_uas_e += uas_e
+            result_graph.append(result_t)
+            target_graph.append(target_t)
+
+        input_graph = adj_mat_to_target(adj_mat=adm)
+
+        if self.params.get('is_test'):
+            word_input = word_inputs[i]
+            target_pos_i = target_pos[i]
+            self.write_results_analysis(
+                word_input=word_input, target_pos=target_pos_i,
+                result_graph=result_graph, target_graph=target_graph,
+                input_graph=input_graph, csv_file=out_file)
+        else:
+            if out_file:
+                self.write_to_file(id, target_graph, result_graph, input_graph,
+                                   out_file=out_file)
+        acc_las = acc_las / b
+        acc_uas = acc_uas / b
+        acc_uas_e = acc_uas_e / b
+
+        return acc_las, acc_uas, acc_uas_e
+
     def humanize_batch_results_btb(self, labels, computed_values, num_vertices,
                                    mask, ids=None, adms=None, labels_e=None,
                                    computed_values_e=None, mask_edges=None,
@@ -1205,6 +1389,7 @@ class DenseGGNNChemModel(ChemModel):
                 adj_mat=result_e, is_probability=True)
             result_graph = self.merge_head_and_edge_graph(result_graph_h, result_graph_e)
             input_graph =  adj_mat_to_target(adj_mat=adm)
+
             las, uas = self.get_las_uas(target_graph, result_graph)
             _, uas_e = self.get_las_uas(target_graph_e, result_graph_e, is_edge=True)
 
@@ -1329,9 +1514,19 @@ class DenseGGNNChemModel(ChemModel):
                 uas += 1
             elif target_edge[uas_index] == result_edge[uas_index]:
                 uas += 1
-
         return las/total_edges, uas/total_edges
 
+    @staticmethod
+    def get_las_uas_w(target_edge, result_edge, is_edge=False):
+        uas_index = 1 if is_edge else 0
+        las, uas = 0, 0
+        if target_edge == result_edge:
+            las = 1
+            uas = 1
+        elif target_edge[uas_index] == result_edge[uas_index]:
+            uas = 1
+
+        return las, uas
 
 def main():
     args = docopt(__doc__)

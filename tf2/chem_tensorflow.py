@@ -185,6 +185,7 @@ class ChemModel(object):
         self.loc_embedding_size  = 80
         self.word_embedding_size = 100
         self.edge_embedding_size = 50
+        self.target_node_embedding_size = 20
 
         self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['input_tree_bank'])
@@ -346,6 +347,7 @@ class ChemModel(object):
                                                                   self.weights['regression_gate_task_edges%i' % task_id],
                                                                   self.weights['regression_transform_task_edges%i' % task_id],
                                                                   is_edge_regr=True)
+
                     # [b, v * e]
 
                 # task_target_mask = self.placeholders['target_mask'][internal_id, :]
