@@ -468,10 +468,8 @@ class DenseGGNNChemModel(ChemModel):
         # ID [e * b * v, h] else [b * v, h]
         gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
         # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
-
         node_mask = self.placeholders['node_mask']
         # BTB: #[b, v * o] ID [b, e * v * o]
-        softmax_mask = self.placeholders['softmax_mask'] # ID [b, e * v * o]
 
         if self.args['--pr'] == 'molecule':
             gated_outputs = tf.reshape(gated_outputs, [-1,v])  # [b, v]
@@ -505,13 +503,8 @@ class DenseGGNNChemModel(ChemModel):
             # node_mask [b, v * o]
             # node_mask_edge  [b, v * e]
             gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
-            if self.args['--pr'] in ['btb_w'] and is_edge_regr:
-                # gated_outputs = tf.reshape(softmax, [b, v, output_n]) # [b, v, o]
-                gated_outputs = tf.reduce_sum(gated_outputs, axis=1) # [b, o]
-                softmax = tf.nn.softmax(gated_outputs, axis=1)  # [b, o]
-            else:
-                softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, o]
-                softmax = tf.reshape(softmax, [b, v * output_n]) # [b, v * o]
+            softmax = tf.nn.softmax(gated_outputs, axis=2) # [b, v, o]
+            softmax = tf.reshape(softmax, [b, v * output_n]) # [b, v * o]
 
             self.output = softmax
 
@@ -520,8 +513,7 @@ class DenseGGNNChemModel(ChemModel):
             # node_mask [b, v]
             # node_mask_edge  [b, e]
             if  is_edge_regr:
-                gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v]
-                # gated_outputs = tf.reshape(softmax, [b, v, output_n]) # [b, v, o]
+                gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
                 gated_outputs = tf.reduce_sum(gated_outputs, axis=1) # [b, o]
                 softmax = tf.nn.softmax(gated_outputs, axis=1)  # [b, o]
             else:
@@ -913,6 +905,7 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['target_pos']: target_pos
                 # [b, v]
             }
+
             if self.args['--pr'] not in ['btb', 'btb_w']:
                 initial_representations = batch_data['init']
                 initial_representations = self.pad_annotations(

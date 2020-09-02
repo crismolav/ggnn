@@ -403,7 +403,7 @@ class ChemModel(object):
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))
                         # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
-                        task_loss = (task_loss_heads + task_loss_edges)
+                        task_loss = (task_loss_heads )
                     else:
                         if self.args.get('--no_labels'):
                             computed_values, labels, mask = self.reduce_edge_dimension(
@@ -726,7 +726,7 @@ class ChemModel(object):
 
                 # val_acc = train_loss
                 #TODO: reconsider this change, we are now using loss as accuracy
-                val_acc = 1-valid_las
+                val_acc = 1-train_uas
                 # if val_acc < best_val_acc:
 
                 ##here look at train_las and print valid las
