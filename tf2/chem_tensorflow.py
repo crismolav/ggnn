@@ -92,7 +92,7 @@ class ChemModel(object):
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
             'emb_dropout_keep_prob': 0.8,
-            'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
+            'hidden_size': 450 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -185,7 +185,7 @@ class ChemModel(object):
         self.loc_embedding_size  = 80
         self.word_embedding_size = 100
         self.edge_embedding_size = 50
-        self.target_node_embedding_size = 1
+        self.target_node_embedding_size = 100
 
         self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['input_tree_bank'])
