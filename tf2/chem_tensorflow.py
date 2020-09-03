@@ -185,7 +185,7 @@ class ChemModel(object):
         self.loc_embedding_size  = 80
         self.word_embedding_size = 100
         self.edge_embedding_size = 50
-        self.target_node_embedding_size = 10
+        self.target_node_embedding_size = 1
 
         self.dep_list, self.pos_list, self.word_list, self.vocab_size, self.max_nodes = sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['input_tree_bank'])
