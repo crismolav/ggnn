@@ -432,8 +432,9 @@ class DenseGGNNChemModel(ChemModel):
             m = tf.reshape(m, [b, -1, h_dim]) #  [b, e * v, h]  bd: [b, 2e * v, h]
 
             #TODO try other option for v
+            b_adj = self.params['batch_size'] if self.args['--pr'] == 'btb_w' else b
             adj_m = tf.transpose(self.__adjacency_matrix, [1, 2, 0, 3]) # [b, v', e, v]
-            adj_m = tf.reshape(adj_m, [1, v, 2*e*v]) # [b, v' , e * v] bd: [b, v', 2e * v]
+            adj_m = tf.reshape(adj_m, [b_adj, v, 2*e*v]) # [b, v' , e * v] bd: [b, v', 2e * v]
             # acts = tf.math.reduce_sum(acts, axis=0)  # [b, v, h]
 
         # adj_m  else [b, v' , e * v] ID :[e, b, v', v]
