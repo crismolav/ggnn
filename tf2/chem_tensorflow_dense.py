@@ -312,7 +312,7 @@ class DenseGGNNChemModel(ChemModel):
                 edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
             word_inputs_e = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
+                [loc_inputs, pos_inputs, word_index_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             if self.args['--pr'] in ['btb_w']:
                 target_node_inputs = tf.nn.embedding_lookup(
