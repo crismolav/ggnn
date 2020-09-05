@@ -308,9 +308,8 @@ class DenseGGNNChemModel(ChemModel):
                 if i > 0:
                     tf.compat.v1.get_variable_scope().reuse_variables()
                 acts = self.compute_timestep(h, e, v, b, h_dim)
-                # ID [e * b * v, h] else (b * v, h)s
-                # h = self.weights['node_gru'](acts, h)[1]
-                h = acts
+                # ID [e * b * v, h] else (b * v, h)
+                h = self.weights['node_gru'](acts, h)[1]
                 # ID [e * b * v, h]  NL (b * v, h) (b * v, h)                                      # [b*v, h]
                 self.ops['h_gru'] = tf.identity(h)
             if self.args['--pr'] in ['identity']:
