@@ -71,6 +71,9 @@ def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types):
         # outgoing edge
         new_edge = edge_index + num_edge_types
         amat[new_edge, src, dest] = 1
+
+        amat[num_edge_types, src, src] = 1
+
     #[2e, v', v]
     return amat
 

@@ -195,7 +195,7 @@ class ChemModel(object):
         self.dep_list_out, self.pos_list_out, _, _ , _= sample_dep_list if self.args.get('--sample') else get_dep_and_pos_list(
             bank_type=self.params['output_tree_bank'])
 
-        self.num_edge_types = len(self.dep_list)
+        self.num_edge_types = len(self.dep_list) + 1
         self.output_size_edges = len(self.dep_list_out)
 
         if self.params.get('is_test'):
