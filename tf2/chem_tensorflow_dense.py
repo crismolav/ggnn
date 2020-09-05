@@ -402,7 +402,7 @@ class DenseGGNNChemModel(ChemModel):
         acts = tf.matmul(adj_m, m)
         # else: [b, v, h] ID [e, b, v, h]
 
-        acts = tf.nn.relu(tf.reshape(acts, [-1, h_dim]))  # ID [e * b * v, h] [b * v, h]
+        acts = tf.reshape(acts, [-1, h_dim])  # ID [e * b * v, h] [b * v, h]
         self.ops['acts'] = tf.identity(acts)
         self.ops['m'] = tf.identity(m)
         self.ops['edge_weights'] = tf.identity(self.weights['edge_weights'])
