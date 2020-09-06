@@ -62,16 +62,16 @@ def graph_to_adj_mat_dir(graph, max_n_vertices, num_edge_types):
     #[e, v', v]
     return amat
 
-def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types):
+def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types, is_baseline=False):
     amat = np.zeros((2*num_edge_types, max_n_vertices, max_n_vertices))
     for i, (src, e, dest) in enumerate(graph):
         # incoming edge
         edge_index = e - 1
         amat[edge_index, dest, src] = 1
         # outgoing edge
-        new_edge = edge_index + num_edge_types
-        amat[new_edge, src, dest] = 1
-
+        if not is_baseline:
+            new_edge = edge_index + num_edge_types
+            amat[new_edge, src, dest] = 1
         # amat[num_edge_types, src, src] = 1
 
     #[2e, v', v]
@@ -503,7 +503,8 @@ class DenseGGNNChemModel(ChemModel):
             words_head = [0] + [x[0] for x in d['graph']]
             edges_index = [0] + [x[1] for x in d['graph']]
             bucketed_dict = {
-                'adj_mat':  graph_to_adj_mat_bd(d['graph'], chosen_bucket_size, self.num_edge_types),
+                'adj_mat':  graph_to_adj_mat_bd(
+                    d['graph'], chosen_bucket_size, self.num_edge_types, is_baseline=True),
                 #[e, v', v] bd [2e, v', v]
                 'init': node_features_vector + [[0 for _ in range(x_dim)] for __ in
                                               range(chosen_bucket_size - n_active_nodes)],
