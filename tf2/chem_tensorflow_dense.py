@@ -198,6 +198,9 @@ class DenseGGNNChemModel(ChemModel):
         if self.params['use_edge_bias']:
             self.weights['edge_biases'] = tf.Variable(np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
 
+        self.weights['att_weights'] = tf.Variable(
+            glorot_init([2 * self.params['hidden_size'], 2 * self.params['hidden_size']]))
+
         self.weights['loc_embeddings'] = tf.compat.v1.get_variable(
             'loc_embeddings', [self.max_nodes, self.loc_embedding_size],
             dtype=tf.float32)
@@ -426,6 +429,9 @@ class DenseGGNNChemModel(ChemModel):
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
+        gate_input = tf.matmul(gate_input, tf.nn.tanh(self.weights['att_weights'])) #  [b * v, 2h] x [2h, 2h]
+        # [b * v, 2h]
+
         last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
         # ID [e * b * v, h] else [b * v, h]
         gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
