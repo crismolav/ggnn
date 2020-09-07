@@ -91,7 +91,7 @@ class ChemModel(object):
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.80,
-            'emb_dropout_keep_prob': 0.7,
+            'emb_dropout_keep_prob': 0.8,
             'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
@@ -325,12 +325,12 @@ class ChemModel(object):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [350],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
+                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [350],
                                                                                 self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_transform_task_edges%i' % task_id] = MLP(self.params['hidden_size'], self.output_size_edges, [],
                                                                                       self.placeholders['out_layer_dropout_keep_prob'])
