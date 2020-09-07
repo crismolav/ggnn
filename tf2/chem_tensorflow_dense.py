@@ -429,7 +429,8 @@ class DenseGGNNChemModel(ChemModel):
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
-        gate_input = tf.matmul(gate_input, tf.nn.tanh(self.weights['att_weights'])) #  [b * v, 2h] x [2h, 2h]
+
+        # gate_input = tf.matmul(gate_input, tf.nn.tanh(self.weights['att_weights'])) #  [b * v, 2h] x [2h, 2h]
         # [b * v, 2h]
 
         last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
