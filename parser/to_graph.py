@@ -232,8 +232,8 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                         break
                     continue
                 line_as_list = line.split('\t')
-                word = line_as_list[1].lower()
-                pos = line_as_list[3]
+                word = line_as_list[1].strip().lower()
+                pos = line_as_list[3].strip()
                 dep = line_as_list[7].strip()
                 if file_name in ['en-wsj-std-train-stanford-3.3.0.conll', 'en-wsj-ym-nivre-train.conll']:
                     word_set.add(word)
