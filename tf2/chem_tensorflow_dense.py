@@ -433,7 +433,7 @@ class DenseGGNNChemModel(ChemModel):
         # gate_input = tf.matmul(gate_input, tf.nn.tanh(self.weights['att_weights'])) #  [b * v, 2h] x [2h, 2h]
         # [b * v, 2h]
 
-        last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
+        #last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
         # ID [e * b * v, h] else [b * v, h]
         # gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
         gated_outputs = regression_gate(gate_input)
