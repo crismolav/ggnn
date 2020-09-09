@@ -823,7 +823,9 @@ class DenseGGNNChemModel(ChemModel):
                 words_pos=batch_data['target_pos'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
 
-            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
+            # word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
+            #                         head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
+            word_inputs = np.stack((pos_inputs, word_id_inputs,
                                     head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
             # [b, v, 6]
             batch_feed_dict = {
