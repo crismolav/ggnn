@@ -327,7 +327,7 @@ class ChemModel(object):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [500]*10,
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
@@ -759,6 +759,14 @@ class ChemModel(object):
                     print("Test Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
                           (test_las * 100, test_uas * 100, test_uas_e * 100))
                     print("Stopping training after %i epochs without improvement on validation accuracy." % self.params['patience'])
+
+                    print("Train\t%.2f\t%.2f\t%.2f" % (
+                        train_las * 100, train_uas * 100, train_uas_e * 100))
+                    print("Valid\t%.2f\t%.2f\t%.2f" % (
+                        valid_las * 100, valid_uas * 100, valid_uas_e * 100))
+                    print("Test\t%.2f\t%.2f\t%.2f" % (
+                        test_las * 100, test_uas * 100, test_uas_e * 100))
+
                     break
 
     def save_results(self, labels, values, num_vertices, masks, ids, adm, labels_e, values_e=None,
