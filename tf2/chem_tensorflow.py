@@ -91,7 +91,7 @@ class ChemModel(object):
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
             'out_layer_dropout_keep_prob': 0.75,
-            'emb_dropout_keep_prob': 0.7,
+            'emb_dropout_keep_prob': 0.55,
             'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
@@ -798,7 +798,10 @@ class ChemModel(object):
             for variable in self.sess.graph.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES):
                 used_vars.add(variable.name)
                 if variable.name in data_to_load['weights']:
-                    restore_ops.append(variable.assign(data_to_load['weights'][variable.name]))
+                    try:
+                        restore_ops.append(variable.assign(data_to_load['weights'][variable.name]))
+                    except:
+                        set_trace()
                 else:
                     print('Freshly initializing %s since no saved value was found.' % variable.name)
                     variables_to_initialize.append(variable)

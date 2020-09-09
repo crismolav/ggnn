@@ -236,7 +236,7 @@ class DenseGGNNChemModel(ChemModel):
         prob = tf.ones(mask_shape) * prob
         return tf.where(rand < prob, ones, zeros)
 
-    def dropout(self, inputs, embed_keep_prob, block_out=True):
+    def dropout(self, inputs, embed_keep_prob, block_out=False):
         if block_out:
             ph = tf.unstack(inputs, axis=-1)[0]
             # ph = tf.shape(inputs)[-1]
