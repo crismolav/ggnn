@@ -2,8 +2,8 @@
 #SBATCH -J task1
 #SBATCH -p high
 #SBATCH --workdir=/homedtic/cmorales
-#SBATCH -o /homedtic/cmorales/log/%N.%J.task1.out # STDOUT
-#SBATCH -e /homedtic/cmorales/log/%N.%J.task1.err # STDOUT
+#SBATCH -o /homedtic/cmorales/log2/%N.%J.task1.out # STDOUT
+#SBATCH -e /homedtic/cmorales/log2/%N.%J.task1.err # STDOUT
 # Number of GPUs per node
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
