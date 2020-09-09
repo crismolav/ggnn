@@ -284,10 +284,10 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = self.dropout(
                 edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
-
+            # word_inputs_e = tf.concat(
+            #     [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
             word_inputs_e = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
-
+                [pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
             word_inputs_e = tf.pad(word_inputs_e, [[0, 0], [0, 0], [0, h_dim - word_inputs_e.shape[-1]]],
                                  mode='constant')
@@ -823,10 +823,9 @@ class DenseGGNNChemModel(ChemModel):
                 words_pos=batch_data['target_pos'], b=num_graphs, v=bucket_sizes[bucket])
             # [b, v]
 
-            # word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
-            #                         head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
-            word_inputs = np.stack((pos_inputs, word_id_inputs,
+            word_inputs = np.stack((loc_inputs, pos_inputs, word_id_inputs,
                                     head_loc_inputs, head_pos_inputs, edges_inputs), axis=2)
+
             # [b, v, 6]
             batch_feed_dict = {
                 self.placeholders['target_values_head']: target_values,
