@@ -970,8 +970,9 @@ class DenseGGNNChemModel(ChemModel):
         test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
             self.run_epoch("Test run", self.test_data, False, 0)
         print("Running model on test file: %s\n"%self.params['test_file'])
-        print("Test Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
+        print("Test Attachment scores - LAS : %.2f%% - UAS : %.2f%% - UAS_e : %.2f%%" %
               (test_las * 100, test_uas * 100, test_uas_e * 100))
+        print("%.2f\t%.2f\t%.2f" % (test_las * 100, test_uas * 100, test_uas_e * 100))
 
     def evaluate_results(self, data_for_batch):
 
