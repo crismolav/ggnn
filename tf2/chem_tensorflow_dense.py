@@ -964,6 +964,7 @@ class DenseGGNNChemModel(ChemModel):
         print("Running model on test file: %s\n"%self.params['test_file'])
         print("Test Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
               (test_las * 100, test_uas * 100, test_uas_e * 100))
+        print("%.2f\t%.2f\t%.2f" % (test_las * 100, test_uas * 100, test_uas_e * 100))
 
     def evaluate_results(self, data_for_batch):
 
