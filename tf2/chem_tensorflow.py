@@ -766,7 +766,7 @@ class ChemModel(object):
                         valid_las * 100, valid_uas * 100, valid_uas_e * 100))
                     print("Test\t%.2f\t%.2f\t%.2f" % (
                         test_las * 100, test_uas * 100, test_uas_e * 100))
-
+                    print("Epoch\t%i"%epoch)
                     break
 
     def save_results(self, labels, values, num_vertices, masks, ids, adm, labels_e, values_e=None,
