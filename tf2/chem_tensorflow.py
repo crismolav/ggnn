@@ -326,10 +326,11 @@ class ChemModel(object):
         for (internal_id, task_id) in enumerate(self.params['task_ids']):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
+                hidden = [350] * 1
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, hidden,
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
+                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, hidden,
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
