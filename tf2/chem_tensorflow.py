@@ -90,10 +90,10 @@ class ChemModel(object):
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
-            'out_layer_dropout_keep_prob': 0.97,
+            'out_layer_dropout_keep_prob': 0.9,
             'emb_dropout_keep_prob': 0.55,
             'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
-            'num_timesteps': 4,
+            'num_timesteps': 2,
             'use_graph': True,
 
             'tie_fwd_bkwd': True,
@@ -326,7 +326,7 @@ class ChemModel(object):
         for (internal_id, task_id) in enumerate(self.params['task_ids']):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
-                hidden = [500]*50
+                hidden = []
                 with tf.compat.v1.variable_scope("regression_gate"):
                     self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, hidden,
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
