@@ -90,9 +90,9 @@ class ChemModel(object):
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
-            'out_layer_dropout_keep_prob': 0.90,
-            'emb_dropout_keep_prob': 0.9,
-            'hidden_size': 450 if self.args['--pr'] not in ['identity'] else 350,
+            'out_layer_dropout_keep_prob': 0.95,
+            'emb_dropout_keep_prob': 0.55,
+            'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
             'use_graph': True,
 
@@ -204,8 +204,10 @@ class ChemModel(object):
             self.index_to_word_dict = {v: k for v, k in enumerate(self.word_list)}
         else:
             self.word_list = []
+
             self.train_data = self.load_data(params['train_file'], is_training_data=True)
             self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
+            self.test_data  = self.load_data(params['test_file'], is_training_data=False)
 
         # Build the actual model
         config = tf.compat.v1.ConfigProto()
@@ -325,8 +327,9 @@ class ChemModel(object):
         for (internal_id, task_id) in enumerate(self.params['task_ids']):
             with tf.compat.v1.variable_scope("out_layer_task%i" % task_id):
                 output_size =  self.params['output_size']
+                hidden = []
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, [100],
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, hidden,
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
                     self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
@@ -749,7 +752,32 @@ class ChemModel(object):
 
 
                 elif epoch - best_val_acc_epoch >= self.params['patience']:
+                    test_loss, test_accs, test_errs, test_speed, test_steps, test_las, \
+                    test_uas, test_labels, test_values, test_v, test_masks, test_ids, \
+                    test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
+                        self.run_epoch("epoch %i (validation)" % epoch, self.test_data, False, 0)
+
+                    accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in
+                                         zip(self.params['task_ids'], test_accs)])
+                    errs_str = " ".join(["%i:%.5f" % (id, err) for (id, err) in
+                                         zip(self.params['task_ids'], test_errs)])
+                    print(
+                        "\r\x1b[K Valid: loss: %.5f | acc: %s | error_ratio: %s | instances/sec: %.2f" % (
+                        test_loss,
+                        accs_str,
+                        errs_str,
+                        test_speed))
+                    print("Test Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
+                          (test_las * 100, test_uas * 100, test_uas_e * 100))
                     print("Stopping training after %i epochs without improvement on validation accuracy." % self.params['patience'])
+
+                    print("Train\t%.2f\t%.2f\t%.2f" % (
+                        train_las * 100, train_uas * 100, train_uas_e * 100))
+                    print("Valid\t%.2f\t%.2f\t%.2f" % (
+                        valid_las * 100, valid_uas * 100, valid_uas_e * 100))
+                    print("Test\t%.2f\t%.2f\t%.2f" % (
+                        test_las * 100, test_uas * 100, test_uas_e * 100))
+                    print("Epoch\t%i"%epoch)
                     break
 
     def save_results(self, labels, values, num_vertices, masks, ids, adm, labels_e, values_e=None,
@@ -808,7 +836,10 @@ class ChemModel(object):
             for variable in self.sess.graph.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES):
                 used_vars.add(variable.name)
                 if variable.name in data_to_load['weights']:
-                    restore_ops.append(variable.assign(data_to_load['weights'][variable.name]))
+                    try:
+                        restore_ops.append(variable.assign(data_to_load['weights'][variable.name]))
+                    except:
+                        set_trace()
                 else:
                     print('Freshly initializing %s since no saved value was found.' % variable.name)
                     variables_to_initialize.append(variable)

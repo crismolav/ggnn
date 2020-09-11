@@ -71,6 +71,9 @@ def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types):
         # outgoing edge
         new_edge = edge_index + num_edge_types
         amat[new_edge, src, dest] = 1
+
+        # amat[num_edge_types, src, src] = 1
+
     #[2e, v', v]
     return amat
 
@@ -224,6 +227,9 @@ class DenseGGNNChemModel(ChemModel):
         if self.params['use_edge_bias']:
             self.weights['edge_biases'] = tf.Variable(np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
 
+        self.weights['att_weights'] = tf.Variable(
+            glorot_init([2 * self.params['hidden_size'], 2 * self.params['hidden_size']]))
+
         self.weights['loc_embeddings'] = tf.compat.v1.get_variable(
             'loc_embeddings', [self.max_nodes, self.loc_embedding_size],
             dtype=tf.float32)
@@ -311,8 +317,8 @@ class DenseGGNNChemModel(ChemModel):
             edges_inputs = self.dropout(
                 edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
-            word_inputs_e = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs], 2)
+            word_inputs_e = tf.concat([loc_inputs, pos_inputs, word_index_inputs], 2)
+
             # BTB: [b, v, l_em + p_em ...]
             if self.args['--pr'] in ['btb_w']:
                 target_node_inputs = tf.nn.embedding_lookup(
@@ -465,9 +471,14 @@ class DenseGGNNChemModel(ChemModel):
         # ID [e, b, v, 2h] else [b, v, 2h]
         gate_input = tf.reshape(gate_input, [-1, 2 * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
-        last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
+
+        # gate_input = tf.matmul(gate_input, tf.nn.tanh(self.weights['att_weights'])) #  [b * v, 2h] x [2h, 2h]
+        # [b * v, 2h]
+
+        #last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
         # ID [e * b * v, h] else [b * v, h]
-        gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
+        # gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(last_h)
+        gated_outputs = regression_gate(gate_input)
         # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
         node_mask = self.placeholders['node_mask']
         # BTB: #[b, v * o] ID [b, e * v * o]
@@ -1074,8 +1085,9 @@ class DenseGGNNChemModel(ChemModel):
         test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
             self.run_epoch("Test run", self.test_data, False, 0)
         print("Running model on test file: %s\n"%self.params['test_file'])
-        print("Test Attachment scores - LAS : %.1f%% - UAS : %.1f%% - UAS_e : %.1f%%" %
+        print("Test Attachment scores - LAS : %.2f%% - UAS : %.2f%% - UAS_e : %.2f%%" %
               (test_las * 100, test_uas * 100, test_uas_e * 100))
+        print("%.2f\t%.2f\t%.2f" % (test_las * 100, test_uas * 100, test_uas_e * 100))
 
     def evaluate_results(self, data_for_batch):
 
