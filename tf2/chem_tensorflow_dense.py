@@ -148,7 +148,7 @@ class DenseGGNNChemModel(ChemModel):
         params = dict(super().default_params())
         # graph_state_dropout_keep_prob is used for feeding edge_weight_dropout_keep_prob
         params.update({
-                        'graph_state_dropout_keep_prob': 0.7,
+                        'graph_state_dropout_keep_prob': 0.8,
                         'task_sample_ratios': {},
                         'use_edge_bias': True,
                         'edge_weight_dropout_keep_prob': 1
