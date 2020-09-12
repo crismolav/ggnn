@@ -181,9 +181,9 @@ class ChemModel(object):
         self.output_size_edges = 0
 
         # embedding sizes
-        self.pos_embedding_size  = 50
-        self.loc_embedding_size  = 80
-        self.word_embedding_size = 100
+        self.pos_embedding_size  = 20
+        self.loc_embedding_size  = 40
+        self.word_embedding_size = 5    0
         self.edge_embedding_size = 50
         self.target_node_embedding_size = 200
 
