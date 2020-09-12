@@ -456,7 +456,8 @@ class DenseGGNNChemModel(ChemModel):
         self.ops['_am'] = tf.identity(self.__adjacency_matrix)
         return acts
 
-    def gated_regression(self, last_h, initial_node_representations, regression_gate, regression_transform, is_edge_regr=False):
+    def gated_regression(self, last_h, initial_node_representations, regression_gate,
+                         regression_transform, is_edge_regr=False):
         # last_h ID [e, b, v, h] else [b, v, h]
         b = self.placeholders['num_graphs']
         e = self.num_edge_types
@@ -476,7 +477,9 @@ class DenseGGNNChemModel(ChemModel):
             last_h = tf.reshape(last_h, [-1, self.params["hidden_size"]])
             # ID [e * b * v, h] else [b * v, h]
             gated_outputs = tf.nn.sigmoid(regression_gate(gate_input)) * regression_transform(gate_input)
-            # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
+            gated_outputs = tf.reshape(gated_outputs, [b, v, output_n]) #[b, v, o]
+            gated_outputs = tf.reduce_sum(gated_outputs, axis=1)
+            # BTB [b, o]
         else:
             gated_outputs = regression_gate(gate_input)
             # BTB [b * v, o] ID [e * b * v, o] else [b * v, 1]
@@ -521,16 +524,16 @@ class DenseGGNNChemModel(ChemModel):
             self.output = softmax
 
         elif self.args['--pr'] in ['btb_w']:
-            # gated_outputs  [b * v, 1]
-            # node_mask [b, v]
+            # gated_outputs  [b, o]
+            # node_mask [b, o]
             # node_mask_edge  [b, e]
             if  is_edge_regr:
-                gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
-                gated_outputs = tf.reduce_sum(gated_outputs, axis=1) # [b, o]
+                # gated_outputs = tf.reshape(gated_outputs, [b, v, output_n])  # [b, v, o]
+                # gated_outputs = tf.reduce_sum(gated_outputs, axis=1) # [b, o]
                 softmax = tf.nn.softmax(gated_outputs, axis=1)  # [b, o]
             else:
-                gated_outputs = tf.reshape(gated_outputs, [b, v])
-                softmax = tf.nn.softmax(gated_outputs, axis=1) # [b, v]
+                # gated_outputs = tf.reshape(gated_outputs, [b, v])
+                softmax = tf.nn.softmax(gated_outputs, axis=1) # [b, o]
 
             self.output = softmax
 
@@ -688,7 +691,7 @@ class DenseGGNNChemModel(ChemModel):
             e_o = self.output_size_edges
             return [1. for _ in range(e_o)]
         else:
-            return [1. for _ in range(n_active_nodes) ] + [0. for _ in range(chosen_bucket_size - n_active_nodes)]
+            return [1. for _ in range(n_active_nodes) ] + [0. for _ in range(self.params['output_size'] - n_active_nodes)]
 
     def get_mask_sm(self, n_active_nodes, chosen_bucket_size):
         if self.args['--pr'] in ['identity', 'btb', 'btb_w']:
@@ -1006,9 +1009,13 @@ class DenseGGNNChemModel(ChemModel):
             return new_labels
         elif self.args['--pr'] in ['btb_w']:
             # labels [b, e, v']
+            o = self.params['output_size']
             new_labels = np.sum(labels, axis=1) # [b, v']
-
-            return new_labels #[b, v']
+            b, v = np.array(new_labels).shape
+            new_labels = np.pad(new_labels,
+                                pad_width=[[0, 0], [0, o - v]],
+                                mode='constant')
+            return new_labels #[b, o]
         else:
             return np.transpose(np.array(labels))
 

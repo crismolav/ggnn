@@ -80,7 +80,7 @@ class ChemModel(object):
         if self.args['--pr'] in ['identity', 'btb']:
             output_size = 150
         else:
-            output_size = 1
+            output_size = 150
         input_tree_bank = self.args.get("--input_tree_bank") if self.args.get(
             "--input_tree_bank") is not None else 'std'
         assert input_tree_bank in ['nivre', 'std']
@@ -343,7 +343,7 @@ class ChemModel(object):
                                                         self.ops['initial_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id])
-                # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
+                # BTB_w [b, o]  BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 if self.args['--pr'] in ['btb', 'btb_w']:
                     computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
                                                                   self.ops[ 'initial_node_representations'],
@@ -403,6 +403,7 @@ class ChemModel(object):
                         # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
                         task_loss = (task_loss_heads + task_loss_edges)
                     elif self.args['--pr'] in ['btb_w']:
+                        # BTB_w [b, o]
                         task_loss_heads = tf.reduce_sum(-tf.reduce_sum(labels * tf.math.log(computed_values), axis = 1))
                         task_loss_edges = tf.reduce_sum(-tf.reduce_sum(labels_edges * tf.math.log(computed_values_edges), axis = 1))
                         # task_loss = (task_loss_heads + task_loss_edges) * tf.cast(self.placeholders['num_vertices'], tf.float32)
