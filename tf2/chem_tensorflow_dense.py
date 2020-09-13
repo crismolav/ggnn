@@ -185,7 +185,7 @@ class DenseGGNNChemModel(ChemModel):
             tf.int32, [None, None], name='target_pos')
         # [b, v]
         self.placeholders['adjacency_matrix'] = tf.compat.v1.placeholder(
-            tf.float32, [None, 2 * self.num_edge_types, None, None], name='adjacency_matrix')
+            tf.float32, [None, self.num_edge_types, None, None], name='adjacency_matrix')
         # [b, e, v', v]
         self.__adjacency_matrix = tf.transpose(a=self.placeholders['adjacency_matrix'], perm=[1, 0, 2, 3])
         # [e, b, v', v]
@@ -194,9 +194,9 @@ class DenseGGNNChemModel(ChemModel):
         # if self.params['use_edge_bias']:
         #     self.weights['edge_biases'] = tf.Variable(np.zeros([self.num_edge_types, 1, h_dim]).astype(np.float32))
         #weights bi directional matrix
-        self.weights['edge_weights'] = tf.Variable(glorot_init([2 * self.num_edge_types, h_dim, h_dim]))
+        self.weights['edge_weights'] = tf.Variable(glorot_init([1 * self.num_edge_types, h_dim, h_dim]))
         if self.params['use_edge_bias']:
-            self.weights['edge_biases'] = tf.Variable(np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
+            self.weights['edge_biases'] = tf.Variable(np.zeros([1 * self.num_edge_types, 1, h_dim]).astype(np.float32))
 
         self.weights['att_weights'] = tf.Variable(
             glorot_init([2 * self.params['hidden_size'], 2 * self.params['hidden_size']]))
@@ -511,7 +511,7 @@ class DenseGGNNChemModel(ChemModel):
             words_head = [0] + [x[0] for x in d['graph']]
             edges_index = [0] + [x[1] for x in d['graph']]
             bucketed_dict = {
-                'adj_mat':  graph_to_adj_mat_bd(d['graph'], chosen_bucket_size, self.num_edge_types),
+                'adj_mat':  graph_to_adj_mat_dir(d['graph'], chosen_bucket_size, self.num_edge_types),
                 #[e, v', v] bd [2e, v', v]
                 'init': node_features_vector + [[0 for _ in range(x_dim)] for __ in
                                               range(chosen_bucket_size - n_active_nodes)],
