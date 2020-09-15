@@ -79,14 +79,6 @@ def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types):
         prev_edge_o = prev_edge + num_edge_types
         amat[prev_edge_o, dest - 1, dest] = 1
 
-        # # add next word edges
-        # if dest != max_n_vertices -1:
-        #     # incoming
-        #     prev_edge = num_edge_types - 1
-        #     amat[prev_edge, dest, dest + 1] = 1
-        #     # outgoing
-        #     prev_edge_o = prev_edge + num_edge_types
-        #     amat[prev_edge_o, dest + 1, dest] = 1
     #[2e, v', v]
     return amat
 
@@ -298,7 +290,7 @@ class DenseGGNNChemModel(ChemModel):
                 edges_inputs, dropout_keep_prob)
             # BTB: [b, v, e_em]
             word_inputs_e = tf.concat(
-                [loc_inputs, pos_inputs, word_index_inputs, head_loc_inputs], 2)
+                [loc_inputs, pos_inputs, word_index_inputs], 2)
             # word_inputs_e = tf.concat(
             #     [pos_inputs, word_index_inputs, head_loc_inputs], 2)
             # BTB: [b, v, l_em + p_em ...]
