@@ -90,7 +90,7 @@ class ChemModel(object):
             'patience': 15,
             'learning_rate': 0.003 if (not self.args.get('--alpha') or self.args.get('--alpha') == '-1') else float(self.args.get('--alpha')),
             'clamp_gradient_norm': 1.0,
-            'out_layer_dropout_keep_prob': 0.95,
+            'out_layer_dropout_keep_prob': 0.85,
             'emb_dropout_keep_prob': 0.55,
             'hidden_size': 350 if self.args['--pr'] not in ['identity'] else 350,
             'num_timesteps': 4,
@@ -318,6 +318,8 @@ class ChemModel(object):
             if self.params['use_graph']:
                 self.ops['final_node_representations'] = self.compute_final_node_representations(
                     self.ops['initial_node_representations'])
+                self.ops['second_node_representations'] = self.compute_final_node_representations(
+                    self.ops['initial_node_representations'], 1)
             else:
                 self.ops['final_node_representations'] = tf.zeros_like(self.placeholders['initial_node_representation'])
 
@@ -328,9 +330,9 @@ class ChemModel(object):
                 output_size =  self.params['output_size']
                 hidden = []
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, hidden,
+                    self.weights['regression_gate_task%i' % task_id] = MLP(3 * self.params['hidden_size'], output_size, hidden,
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
+                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(3 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
@@ -341,13 +343,15 @@ class ChemModel(object):
                 computed_values = self.gated_regression(self.ops['final_node_representations'],
                                                         self.ops['initial_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
-                                                        self.weights['regression_transform_task%i' % task_id])
+                                                        self.weights['regression_transform_task%i' % task_id],
+                                                        self.ops['second_node_representations'])
                 # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 if self.args['--pr'] in ['btb']:
                     computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
                                                                   self.ops[ 'initial_node_representations'],
                                                                   self.weights['regression_gate_task_edges%i' % task_id],
                                                                   self.weights['regression_transform_task_edges%i' % task_id],
+                                                                  self.ops['second_node_representations'],
                                                                   is_edge_regr=True)
                     # [b, v * e]
 
@@ -508,13 +512,14 @@ class ChemModel(object):
                 tf.compat.v1.summary.scalar('accuracy%i' % task_id, self.ops['accuracy_task%i' % task_id])
         self.ops['summary'] = tf.compat.v1.summary.merge_all()
 
-    def gated_regression(self, last_h, initial_node_representations, regression_gate, regression_transform, is_edge_regr=False):
+    def gated_regression(self, last_h, initial_node_representations, regression_gate, regression_transform,
+                         second_node_representations=None, is_edge_regr=False):
         raise Exception("Models have to implement gated_regression!")
 
     def prepare_specific_graph_model(self) -> None:
         raise Exception("Models have to implement prepare_specific_graph_model!")
 
-    def compute_final_node_representations(self, initial_node_representations) -> tf.Tensor:
+    def compute_final_node_representations(self, initial_node_representations, fixed_ts=None) -> tf.Tensor:
         raise Exception("Models have to implement compute_final_node_representations!")
 
     def make_minibatch_iterator(self, data: Any, is_training: bool):
