@@ -73,7 +73,7 @@ def graph_to_adj_mat_bd(graph, max_n_vertices, num_edge_types):
         amat[new_edge, src, dest] = 1
 
         # add previous word edges
-        prev_edge = num_edge_types - 2
+        prev_edge = num_edge_types - 1
         amat[prev_edge, dest, dest - 1] = 1
         # add next word edges
         prev_edge_o = prev_edge + num_edge_types
