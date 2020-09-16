@@ -199,9 +199,17 @@ class DenseGGNNChemModel(ChemModel):
         # if self.params['use_edge_bias']:
         #     self.weights['edge_biases'] = tf.Variable(np.zeros([self.num_edge_types, 1, h_dim]).astype(np.float32))
         #weights bi directional matrix
-        self.weights['edge_weights'] = tf.Variable(glorot_init([2 * self.num_edge_types, h_dim, h_dim]))
+        self.weights['edge_weights'] = tf.Variable(
+            glorot_init([2 * self.num_edge_types, h_dim, h_dim]))
         if self.params['use_edge_bias']:
-            self.weights['edge_biases'] = tf.Variable(np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
+            self.weights['edge_biases'] = tf.Variable(
+                np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
+
+        self.weights['edge_weights_fixed'] = tf.Variable(
+            glorot_init([2 * self.num_edge_types, h_dim, h_dim]))
+        if self.params['use_edge_bias']:
+            self.weights['edge_biases_fixed'] = tf.Variable(
+                np.zeros([2 * self.num_edge_types, 1, h_dim]).astype(np.float32))
 
         self.weights['att_weights'] = tf.Variable(
             glorot_init([2 * self.params['hidden_size'], 2 * self.params['hidden_size']]))
@@ -320,7 +328,7 @@ class DenseGGNNChemModel(ChemModel):
             for i in range(timesteps):
                 if i > 0:
                     tf.compat.v1.get_variable_scope().reuse_variables()
-                acts = self.compute_timestep(h, e, v, b, h_dim)
+                acts = self.compute_timestep(h, e, v, b, h_dim, fixed_ts=fixed_ts)
                 # ID [e * b * v, h] else (b * v, h)
                 h = self.weights['node_gru'](acts, h)[1]
                 # ID [e * b * v, h]  NL (b * v, h) (b * v, h)                                      # [b*v, h]
@@ -331,9 +339,9 @@ class DenseGGNNChemModel(ChemModel):
                 last_h = tf.reshape(h, [-1, v, h_dim]) # (b, v, h)
         return last_h
 
-    def compute_timestep(self, h, e, v, b, h_dim):
+    def compute_timestep(self, h, e, v, b, h_dim, fixed_ts=None):
         if self.args['--pr'] in ['identity', 'btb'] and self.args.get('--new'):
-            acts = self.compute_timestep_fast(h, e, v, b, h_dim)
+            acts = self.compute_timestep_fast(h, e, v, b, h_dim, fixed_ts)
         else:
             acts = self.compute_timestep_normal(h, e, v, b, h_dim)
         # ID [e, b, v, h] [b, v, h]
@@ -380,20 +388,28 @@ class DenseGGNNChemModel(ChemModel):
 
         return acts
 
-    def compute_timestep_fast(self, h, e, v, b, h_dim):
+    def compute_timestep_fast(self, h, e, v, b, h_dim, fixed_ts=None):
         # h: ID: [e* b* v, h] else: [b * v, h]
         # 'edge_weights' : [e, h, h]  bd: [2e, h, h]
         if self.args['--pr'] in ['identity']:
             h = tf.reshape(h, [e, -1, h_dim]) #ID: [e, b * v, h]
-        m = tf.matmul(h, tf.nn.dropout(
-            self.weights['edge_weights'],
-            rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))
+        if fixed_ts is None:
+            m = tf.matmul(h, tf.nn.dropout(
+                self.weights['edge_weights'],
+                rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))
+        else:
+            m = tf.matmul(h, tf.nn.dropout(
+                self.weights['edge_weights_fixed'],
+                rate=1 - self.placeholders['edge_weight_dropout_keep_prob']))
         # [e, b * v, h]  bd: [2e, b * v, h]
         self.ops['m1'] = tf.identity(m)
 
         if self.params['use_edge_bias']:
             #edge_biases : [e, 1, h] bd: [2e, h, h]
-            m += self.weights['edge_biases']
+            if fixed_ts is None:
+                m += self.weights['edge_biases']
+            else:
+                m += self.weights['edge_biases_fixed']
 
         m = tf.reshape(m, [-1, b, v, h_dim])  #[e, b, v, h] bd: [2e, b, v, h]
         adj_m = self.__adjacency_matrix #  [e, b, v', v] bd: [2e, b, v', v]
