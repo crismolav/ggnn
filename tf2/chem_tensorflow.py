@@ -668,6 +668,7 @@ class ChemModel(object):
 
     def train(self):
         log_to_save = []
+        best_train_las, best_train_uas, best_train_uas_e = 0, 0, 0
         total_time_start = time.time()
         avg_train_batch_size = self.get_average_batch_size(data=self.train_data)
         print("Average train batch size: %.2f\n" % avg_train_batch_size)
@@ -745,13 +746,20 @@ class ChemModel(object):
                         masks=valid_masks, ids=valid_ids, adm=valid_adm, labels_e=valid_labels_e,
                         values_e=valid_values_e, masks_e=valid_masks_e, train=False)
 
-
-                elif epoch - best_val_acc_epoch >= self.params['patience']:
                     test_loss, test_accs, test_errs, test_speed, test_steps, test_las, \
                     test_uas, test_labels, test_values, test_v, test_masks, test_ids, \
                     test_adm, test_labels_e, test_values_e, test_masks_e, test_uas_e = \
                         self.run_epoch("epoch %i (validation)" % epoch, self.test_data, False, 0)
 
+                    print("Test Attachment scores - LAS : %.2f%% - UAS : %.2f%% - UAS_e : %.2f%%" %
+                          (test_las * 100, test_uas * 100, test_uas_e * 100))
+
+                    best_train_las, best_train_uas, best_train_uas_e = train_las, train_uas, train_uas_e
+                    best_valid_las, best_valid_uas, best_valid_uas_e = valid_las, valid_uas, valid_uas_e
+                    best_test_las,  best_test_uas,  best_test_uas_e  = test_las, test_uas, test_uas_e
+
+
+                elif epoch - best_val_acc_epoch >= self.params['patience']:
                     accs_str = " ".join(["%i:%.5f" % (id, acc) for (id, acc) in
                                          zip(self.params['task_ids'], test_accs)])
                     errs_str = " ".join(["%i:%.5f" % (id, err) for (id, err) in
@@ -767,11 +775,11 @@ class ChemModel(object):
                     print("Stopping training after %i epochs without improvement on validation accuracy." % self.params['patience'])
 
                     print("Train\t%.2f\t%.2f\t%.2f" % (
-                        train_las * 100, train_uas * 100, train_uas_e * 100))
+                        best_train_las * 100, best_train_uas * 100, best_train_uas_e * 100))
                     print("Valid\t%.2f\t%.2f\t%.2f" % (
-                        valid_las * 100, valid_uas * 100, valid_uas_e * 100))
+                        best_valid_las * 100, best_valid_uas * 100, best_valid_uas_e * 100))
                     print("Test\t%.2f\t%.2f\t%.2f" % (
-                        test_las * 100, test_uas * 100, test_uas_e * 100))
+                        best_test_las * 100, best_test_uas * 100, best_test_uas_e * 100))
                     print("Epoch\t%i"%epoch)
                     break
 

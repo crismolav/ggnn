@@ -432,9 +432,10 @@ class DenseGGNNChemModel(ChemModel):
         l_em = self.loc_embedding_size
         w_em = self.word_embedding_size
         # ID [e, b, v, h] else [b, v, h]
+        hidden_mult = 2 if second_node_representations is None else 3
         gate_input = tf.concat([last_h, initial_node_representations, second_node_representations], axis = -1)
         # ID [e, b, v, 2h] else [b, v, 2h]
-        gate_input = tf.reshape(gate_input, [-1, 3 * self.params["hidden_size"]])
+        gate_input = tf.reshape(gate_input, [-1, hidden_mult * self.params["hidden_size"]])
         # ID [e * b * v, 2h] else [b * v, 2h]
 
         # gate_input = tf.matmul(gate_input, tf.nn.tanh(self.weights['att_weights'])) #  [b * v, 2h] x [2h, 2h]
