@@ -330,9 +330,9 @@ class ChemModel(object):
                 output_size =  self.params['output_size']
                 hidden = []
                 with tf.compat.v1.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(3 * self.params['hidden_size'], output_size, hidden,
+                    self.weights['regression_gate_task%i' % task_id] = MLP(2 * self.params['hidden_size'], output_size, hidden,
                                                                            self.placeholders['out_layer_dropout_keep_prob'])
-                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(3 * self.params['hidden_size'], self.output_size_edges, [],
+                    self.weights['regression_gate_task_edges%i' % task_id] = MLP(2 * self.params['hidden_size'], self.output_size_edges, [],
                                                                                  self.placeholders['out_layer_dropout_keep_prob'])
                 with tf.compat.v1.variable_scope("regression"):
                     self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], output_size, [],
@@ -344,14 +344,14 @@ class ChemModel(object):
                                                         self.ops['initial_node_representations'],
                                                         self.weights['regression_gate_task%i' % task_id],
                                                         self.weights['regression_transform_task%i' % task_id],
-                                                        self.ops['second_node_representations'])
+                                                        None)
                 # BTB [b, v * o] ID [e * v * o,  b]  o is 1 for BTB
                 if self.args['--pr'] in ['btb']:
                     computed_values_edges = self.gated_regression(self.ops['final_node_representations'],
                                                                   self.ops[ 'initial_node_representations'],
                                                                   self.weights['regression_gate_task_edges%i' % task_id],
                                                                   self.weights['regression_transform_task_edges%i' % task_id],
-                                                                  self.ops['second_node_representations'],
+                                                                  None,
                                                                   is_edge_regr=True)
                     # [b, v * e]
 
