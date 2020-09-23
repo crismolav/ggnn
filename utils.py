@@ -77,8 +77,8 @@ class MLP(object):
     def __call__(self, inputs):
         acts = inputs
         for W, b in zip(self.params["weights"], self.params["biases"]):
-            hid = tf.matmul(acts, tf.nn.dropout(W, self.dropout_keep_prob)) + b
-            acts = tf.nn.relu(hid)
+            hid = tf.matmul(acts, tf.nn.dropout(W, 1 - (self.dropout_keep_prob))) + b
+            acts = tf.nn.tanh(hid)
 
         last_hidden = hid
         return last_hidden
@@ -115,7 +115,7 @@ class MLP2(object):
     def __call__(self, inputs):
         acts = inputs
         for W, b in zip(self.params["weights"], self.params["biases"]):
-            dropout = tf.nn.dropout(W, self.dropout_keep_prob)
+            dropout = tf.nn.dropout(W, 1 - (self.dropout_keep_prob))
             dropout_out = dropout.eval(session=tf.compat.v1.Session())
             hid = np.matmul(acts, dropout_out) + b
             acts = self.relu(hid)
