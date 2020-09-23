@@ -19,9 +19,9 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
     graph = []
     target_list = []
     sentence_pos_list = []
+    sentence_pos_list_out = []
     sentence_dict = {}
     words_index_list = []
-
     target_id = None
     dependencies_set = set()
     selected_id = get_random_node(sentence_list)
@@ -33,7 +33,7 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         word = line_as_list[1].lower()
         pos = line_as_list[3]
         father = line_as_list[6]
-        dep = line_as_list[7]
+        dep = line_as_list[7].strip()
         ref_dep_list = sample_dep_list if problem == 'id_sample' else dep_list
         #edges start from 1 not from 0
         edge_type = ref_dep_list.index(dep) + 1
@@ -55,23 +55,28 @@ def process_sentence(sentence_list, dep_list, problem='root', sentence_list_out=
         elif problem in ['btb', 'btb_sample']:
             line_out = sentence_list_out[i]
             line_as_list_out = line_out.split('\t')
+            pos_out = line_as_list_out[3]
             father_out = line_as_list_out[6]
             dep_out = line_as_list_out[7].strip()
             edge_type_out = dep_list_out.index(dep_out) + 1
             target_unit = [int(father_out), int(edge_type_out)]
             target_list.append(target_unit)
-
+            sentence_pos_list_out.append(pos_out)
 
         dependencies_set.add(dep)
 
-    # sentence_dict["targets"] = [[get_node_as_vector(
-    #     id=target_id, last_node=last_node)]]
     sentence_dict["targets"] = target_list
     sentence_dict["graph"]   = graph
     sentence_dict["node_features"] = get_node_features(
         problem=problem, selected_id=selected_id,
         target_id=target_id, sentence_list=sentence_list,
-        sentence_pos_list=sentence_pos_list, pos_list=pos_list)
+        sentence_pos_list=sentence_pos_list,
+        pos_list=pos_list)
+    sentence_dict["node_features_target"] = get_node_features(
+        problem=problem, selected_id=selected_id,
+        target_id=target_id, sentence_list=sentence_list,
+        sentence_pos_list=sentence_pos_list_out,
+        pos_list=pos_list)
     sentence_dict["raw_sentence"] = ' '.join([x.split('\t')[1] for x in sentence_list])
     sentence_dict["id"] = str(sentence_id).zfill(5)
     #we add the zero index to the node zero
@@ -210,6 +215,7 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
     pos_set = set()
     word_set = set()
     max_nodes = 0
+
     for file_name in file_names:
         count = 0
         file_path = get_file_path(file_name=file_name)
@@ -229,7 +235,7 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
                 word = line_as_list[1].lower()
                 pos = line_as_list[3]
                 dep = line_as_list[7].strip()
-                if file_name in ['en-wsj-std-train-stanford-3.3.0.conll']:
+                if file_name in ['en-wsj-std-train-stanford-3.3.0.conll', 'en-wsj-ym-nivre-train.conll']:
                     word_set.add(word)
                 pos_set.add(pos)
                 dep_set.add(dep)
@@ -248,22 +254,45 @@ def get_dep_and_pos_list(bank_type, sample_size=None):
 
     return dep_list, pos_list, word_list, vocab_size, max_nodes
 
+def get_input_output_file(file_type, input_bank):
+    train_files = ('en-wsj-std-train-stanford-3.3.0.conll', 'en-wsj-ym-nivre-train.conll')
+    dev_files = ('en-wsj-std-dev-stanford-3.3.0-tagged.conll', 'en-wsj-ym-nivre-dev.conll')
+    test_files = ('en-wsj-std-test-stanford-3.3.0-tagged.conll', 'en-wsj-ym-nivre-test.conll')
+    if file_type == 'train':
+        if  input_bank == 'std':
+            return train_files
+        elif  input_bank == 'nivre':
+            return train_files[1], train_files[0]
+
+    elif file_type == 'dev':
+        if  input_bank == 'std':
+            return dev_files
+        elif  input_bank == 'nivre':
+            return dev_files[1], dev_files[0]
+    else:
+        if  input_bank == 'std':
+            return test_files
+        elif  input_bank == 'nivre':
+            return test_files[1], test_files[0]
+
 def main():
     problem = sys.argv[1]
     if problem in ['btb', 'btb_id', 'btb_sample']:
-        file_name_in = sys.argv[2]
-        file_name_out = sys.argv[3]
-        sample_size = int(sys.argv[4]) if len(sys.argv) > 4 else None
+        file_type = sys.argv[2]
+        assert file_type in ['train', 'dev', 'test']
+        input_bank = sys.argv[3] if len(sys.argv) > 3 else None
+        assert input_bank in ['std', 'nivre']
+        file_name_in, file_name_out = get_input_output_file(file_type=file_type, input_bank=input_bank)
 
+        sample_size = int(sys.argv[4]) if len(sys.argv) > 4 else None
         file_path_in = get_file_path(file_name=file_name_in)
         file_path_out = get_file_path(file_name=file_name_out)
-
         new_file_path = get_new_file_path(problem=problem, file_name=file_name_in)
 
         count = 0
-
-        dep_list_in, pos_list, word_list, _, _ = get_dep_and_pos_list(bank_type='std', sample_size=sample_size)
-        dep_list_out, _, _, _, _ = get_dep_and_pos_list(bank_type='nivre', sample_size=sample_size)
+        output_bank = 'nivre' if input_bank == 'std' else 'std'
+        dep_list_in, pos_list, word_list, _, _ = get_dep_and_pos_list(bank_type=input_bank, sample_size=sample_size)
+        dep_list_out, _, _, _, _ = get_dep_and_pos_list(bank_type=output_bank, sample_size=sample_size)
 
         word_dict = {k: v for v, k in enumerate(word_list)}
 
@@ -364,5 +393,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #python to_graph.py identity en-wsj-std-dev-stanford-3.3.0-tagged.conll
-    #python to_graph.py btb en-wsj-std-dev-stanford-3.3.0-tagged.conll en-wsj-ym-nivre-dev.conll
+    #(googlevenv) python to_graph.py identity en-wsj-std-dev-stanford-3.3.0-tagged.conll
+    #(googlevenv) python to_graph.py btb dev nivre
