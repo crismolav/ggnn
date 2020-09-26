@@ -5,7 +5,7 @@
 This repository contains and implementation of a Gated Graph Neural Networks
 of [Li et al. 2015](https://arxiv.org/abs/1511.05493) for tranduscing one dependency treebank into another. 
 
-For this project we utilize two dependecy treebanks: Stanford and Matsumoto dependency tree banks and we conver one into another and vice-versa.
+For this project we utilize two dependecy treebanks: Stanford and Matsumoto dependency tree banks and we convert one into another and vice-versa.
 
 ## Preparing data for training
 
