@@ -40,7 +40,7 @@ Train Attachment scores - LAS : 10.6% - UAS : 14.7% - UAS_e : 57.6%
  Valid: loss: 103.24148 | acc: 0:103.24148 | error_ratio: 0:1552.18307 | instances/sec: 31.51
 Valid Attachment scores - LAS : 19.1% - UAS : 23.2% - UAS_e : 75.0%
   (Best epoch so far, cum. val. acc decreased to 0.80929 from inf. Saving to 'borrar/2020-09-23-19-00-58_22474_model_best.pickle')
-Test Attachment scores - LAS : 17.76% - UAS : 21.10% - UAS_e : 74.79%8.47288
+Test Attachment scores - LAS : 17.76% - UAS : 21.10% - UAS_e : 74.79%
 ```
 ## Restoring model
 
