@@ -14,8 +14,8 @@ This step is done in order to preprocess the input data to fit the format requir
 python to_graph.py btb test std
 ```
 
-The first argument is the type of problem, which should be btb, bank-to-bank (we previously tried with intermediate problems such as obtaining a trees root). 
-The second argument indicates which is the set we are tranforming into the required input, in this case it is the test set. The last argument refers to the treebank we are transforming (either Stanford as std or Matsumoto as nivre).
+The first argument is the type of problem, which should be btb, bank-to-bank (we previously tried with intermediate problems such as predicting a tree roots). 
+The second argument indicates which is the set we are tranforming (train, valid or test). The last argument refers to the input treebank (either Stanford as std or Matsumoto as nivre).
 
 
 ## Running Graph Neural Network training
@@ -25,7 +25,7 @@ To run the code we run the following line.
 python chem_tensorflow_dense.py --log_dir borrar  --restrict_data 100 --pr btb --alpha 0.003
 ```
 
-where --restrict_data limits the number of training examples to 100 and -alpha sets the learning rate to 0.003. To look at all the available options for running the code refer to chem_tensorflow_dense.py and look at the top of the code where it says "options".
+where --restrict_data limits the number of training examples and -alpha sets the learning rate. To look at all the available options for running the code refer to chem_tensorflow_dense.py and look at the top of the code where it says "options".
 
 the previous code will output something like the following
 
@@ -44,13 +44,13 @@ Test Attachment scores - LAS : 17.76% - UAS : 21.10% - UAS_e : 74.79%8.47288
 ```
 ## Restoring model
 
-The restore a model and use it on the test set you can run the following code
+To restore a model and use it on the test set you can run the following code
 
 ``` 
 python chem_tensorflow_dense.py --pr btb --log_dir best/st --evaluate --restore st_normal.pickle
 ```
 
-In the previous case we previsouly saved a model as st_normal.picky in the folder best/st and we want to restore it.
+For the above case we previsouly saved a model as st_normal.pickle in the folder best/st.
 
 
 
