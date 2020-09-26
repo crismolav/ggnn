@@ -368,30 +368,6 @@ def main():
                 output_file.write(']')
 
 
-# def count_words_train():
-#     file_name_train = 'en-wsj-std-train-stanford-3.3.0.conll'
-#     file_path_train = get_file_path(file_name=file_name_train)
-#     with open(file_path_train, 'r') as input_file:
-#         lines = input_file.readlines()
-#         for i, line in enumerate(lines):
-#             if line.strip() == '':
-#                 nodes_number = int(last_line[0]) + 1
-#                 if nodes_number > max_nodes:
-#                     max_nodes = nodes_number
-#                 if sample_size is not None and count == sample_size:
-#                     break
-#                 continue
-#             line_as_list = line.split('\t')
-#             pos = line_as_list[3]
-#             dep = line_as_list[7].strip()
-#             pos_set.add(pos)
-#             dep_set.add(dep)
-#             last_line = line_as_list
-        
-    
-
-
 if __name__ == "__main__":
     main()
-    #(googlevenv) python to_graph.py identity en-wsj-std-dev-stanford-3.3.0-tagged.conll
     #(googlevenv) python to_graph.py btb dev nivre
